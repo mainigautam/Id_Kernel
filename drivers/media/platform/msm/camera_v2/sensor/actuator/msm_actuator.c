@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -17,10 +17,15 @@
 #include "msm_actuator.h"
 #include "msm_cci.h"
 
+#include  "../t4k37_otp.h"
+#include  "../t4k35_otp.h"
 DEFINE_MSM_MUTEX(msm_actuator_mutex);
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
+// ZTEMT: fuyipeng add manual AF for imx234  -----start
+#define ZTE_ACTUATOR_MAF_OFFSET 100
+// ZTEMT: fuyipeng add manual AF for imx234  -----end
 
 static struct v4l2_file_operations msm_actuator_v4l2_subdev_fops;
 static int32_t msm_actuator_power_up(struct msm_actuator_ctrl_t *a_ctrl);
@@ -124,6 +129,27 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 		i2c_tbl[a_ctrl->i2c_tbl_index].delay = delay;
 		a_ctrl->i2c_tbl_index++;
 	}
+
+	//ZTE-MT wangqiaoming modify AF problem, begin
+	if (size==2 && i2c_tbl[0].reg_addr==0x4 && i2c_tbl[1].reg_addr==0x3)
+	{
+		uint16_t reg_addr;
+		uint16_t reg_data;
+		uint32_t delay;
+
+		reg_addr=i2c_tbl[0].reg_addr;
+		reg_data=i2c_tbl[0].reg_data;
+		delay=i2c_tbl[0].delay;
+
+		i2c_tbl[0].reg_addr=i2c_tbl[1].reg_addr;
+		i2c_tbl[0].reg_data=i2c_tbl[1].reg_data;
+		i2c_tbl[0].delay=i2c_tbl[1].delay;
+
+		i2c_tbl[1].reg_addr=reg_addr;
+		i2c_tbl[1].reg_data=reg_data;
+		i2c_tbl[1].delay=delay;
+	}
+	//ZTE-MT wangqiaoming modify AF problem, end
 	CDBG("Exit\n");
 }
 
@@ -242,11 +268,8 @@ static int32_t msm_actuator_piezo_move_focus(
 		return -EFAULT;
 	}
 
-	if (num_steps <= 0 || num_steps > MAX_NUMBER_OF_STEPS) {
-		pr_err("num_steps out of range = %d\n",
-			num_steps);
-		return -EFAULT;
-	}
+	if (num_steps == 0)
+		return rc;
 
 	a_ctrl->i2c_tbl_index = 0;
 	a_ctrl->func_tbl->actuator_parse_i2c_params(a_ctrl,
@@ -517,30 +540,6 @@ static int32_t msm_actuator_vreg_control(struct msm_actuator_ctrl_t *a_ctrl,
 	return rc;
 }
 
-#ifdef CONFIG_MACH_T86519A1
-static int msm_actuator_software_pwdn(struct msm_actuator_ctrl_t *a_ctrl)
-{
-	int rc = 0;
-	struct msm_camera_i2c_reg_setting reg_setting;
-	struct msm_camera_i2c_reg_array *i2c_reg_tbl=NULL;
-	struct msm_camera_i2c_reg_array i2c_reg_tbll={0x80,0x00,10};
-
-	a_ctrl->i2c_tbl_index = 1;
-	i2c_reg_tbl = &i2c_reg_tbll;
-	reg_setting.reg_setting = i2c_reg_tbl;
-	reg_setting.size = 1;
-	reg_setting.data_type = MSM_CAMERA_I2C_BYTE_DATA;
-	reg_setting.addr_type = MSM_CAMERA_I2C_BYTE_ADDR;
-	reg_setting.delay = 10;
-	rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_write_table_w_microdelay(
-		&a_ctrl->i2c_client, &reg_setting);
-	if (rc < 0)
-		pr_err("msm_actuator_software_pwdn failed\n");
-
-	return rc;
-}
-#endif
-
 static int32_t msm_actuator_power_down(struct msm_actuator_ctrl_t *a_ctrl)
 {
 	int32_t rc = 0;
@@ -553,10 +552,6 @@ static int32_t msm_actuator_power_down(struct msm_actuator_ctrl_t *a_ctrl)
 				pr_err("%s:%d Lens park failed.\n",
 					__func__, __LINE__);
 		}
-
-#ifdef CONFIG_MACH_T86519A1
-		msm_actuator_software_pwdn(a_ctrl);
-#endif
 
 		rc = msm_actuator_vreg_control(a_ctrl, 0);
 		if (rc < 0) {
@@ -583,20 +578,59 @@ static int32_t msm_actuator_set_position(
 	int32_t index;
 	uint16_t next_lens_position;
 	uint16_t delay;
+	
 	uint32_t hw_params = 0;
+
+	uint16_t value=0;
+
+    uint16_t dac_comp = 45; 
+
 	struct msm_camera_i2c_reg_setting reg_setting;
 	CDBG("%s Enter %d\n", __func__, __LINE__);
-	if (set_pos->number_of_steps <= 0 ||
-		set_pos->number_of_steps > MAX_NUMBER_OF_STEPS) {
-		pr_err("num_steps out of range = %d\n",
-			set_pos->number_of_steps);
-		return -EFAULT;
-	}
+	if (set_pos->number_of_steps  == 0)
+		return rc;
+
+    pr_err("msm_actuator_set_position---act_name:%s \n", a_ctrl->act_name);
+    if ((!strncmp(a_ctrl->act_name, "rohm_bu64297gwz", 32)) || (!strncmp(a_ctrl->act_name, "imx214_sunny_c1507", 32)) \
+		|| (!strncmp(a_ctrl->act_name, "alps_bu64297gwz", 32)))
+    {
+  	  hw_params = 0xF400;
+    }
+
 
 	a_ctrl->i2c_tbl_index = 0;
 	for (index = 0; index < set_pos->number_of_steps; index++) {
 		next_lens_position = set_pos->pos[index];
 		delay = set_pos->delay[index];
+
+		if ((!strncmp(a_ctrl->act_name, "rohm_bu64297gwz", 32)) || (!strncmp(a_ctrl->act_name, "imx214_sunny_c1507", 32)) \
+			|| (!strncmp(a_ctrl->act_name, "alps_bu64297gwz", 32))) {
+			value = set_pos->pos[index];
+			if(value < 0 || value > 79){
+				pr_err("%s value is invalid %d\n", __func__, __LINE__);
+				return rc;
+			}
+
+			value = 79 - value;
+			if(value == 79)
+			{
+				next_lens_position = a_ctrl->region_params[a_ctrl->region_size - 1].step_bound[MOVE_NEAR] + 
+					a_ctrl->step_position_table[0] + ZTE_ACTUATOR_MAF_OFFSET;
+				if (next_lens_position > 1000)
+				{
+					next_lens_position = 1000;
+				}
+				a_ctrl->curr_step_pos = a_ctrl->region_params[a_ctrl->region_size - 1].step_bound[MOVE_NEAR] - 3;
+			}
+			else
+			{
+				 int code_total = a_ctrl->region_params[a_ctrl->region_size - 1].step_bound[MOVE_NEAR];
+				 next_lens_position = a_ctrl->step_position_table[0] + (code_total * value / 79) + dac_comp;
+				 a_ctrl->curr_step_pos = next_lens_position - a_ctrl->step_position_table[0];
+			}
+		}
+
+
 		a_ctrl->func_tbl->actuator_parse_i2c_params(a_ctrl,
 		next_lens_position, hw_params, delay);
 
@@ -794,6 +828,16 @@ static int32_t msm_actuator_config(struct msm_actuator_ctrl_t *a_ctrl,
 		if (rc < 0)
 			pr_err("init table failed %d\n", rc);
 		break;
+	// ZTEMT: fuyipeng add for manual AF -----start
+	case CFG_SET_ACTUATOR_NAME:
+		if (NULL != cdata->cfg.act_name) {
+			strncpy(a_ctrl->act_name,
+				cdata->cfg.act_name,
+				MSM_ACTUATOT_MAX_NAME - 1);
+			pr_err("CFG_SET_ACTUATOR_NAME ---act_name:%s \n", a_ctrl->act_name);
+		}
+		break;
+	// ZTEMT: fuyipeng add for manual AF -----end
 
 	case CFG_SET_DEFAULT_FOCUS:
 		rc = a_ctrl->func_tbl->actuator_set_default_focus(a_ctrl,
@@ -915,8 +959,6 @@ static long msm_actuator_subdev_ioctl(struct v4l2_subdev *sd,
 		return msm_actuator_get_subdev_id(a_ctrl, argp);
 	case VIDIOC_MSM_ACTUATOR_CFG:
 		return msm_actuator_config(a_ctrl, argp);
-	case MSM_SD_NOTIFY_FREEZE:
-		return 0;
 	case MSM_SD_SHUTDOWN:
 		msm_actuator_close(sd, NULL);
 		return 0;
@@ -1007,6 +1049,13 @@ static long msm_actuator_subdev_do_ioctl(
 
 			parg = &actuator_data;
 			break;
+		// ZTEMT: fuyipeng add for manual AF -----start
+        case CFG_SET_ACTUATOR_NAME:
+           actuator_data.cfgtype = u32->cfgtype;
+           actuator_data.cfg.act_name = u32->cfg.act_name;
+           parg = &actuator_data;
+		break;
+            // ZTEMT: fuyipeng add for manual AF -----end
 		case CFG_SET_DEFAULT_FOCUS:
 		case CFG_MOVE_FOCUS:
 			actuator_data.cfgtype = u32->cfgtype;

@@ -160,11 +160,11 @@
 &qcom_seecom {
 	status = "okay";
 };
-
+/* xiesu del no used
 &ncp6335d {
 	status = "disabled";
 };
-
+*/
 &fan53555 {
 	status = "disabled";
 };

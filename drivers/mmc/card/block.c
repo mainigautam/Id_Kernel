@@ -144,6 +144,12 @@ struct mmc_blk_data {
 	int	area_type;
 };
 
+//chenjian add for mmc info start
+unsigned int	emmc_manfid=0;
+char		emmc_prod_name[8];
+int             start_flag=1;
+//chenjian add for mmc info end
+
 static DEFINE_MUTEX(open_lock);
 
 enum {
@@ -3280,9 +3286,96 @@ static const struct mmc_fixup blk_fixups[] =
 	END_FIXUP
 };
 
-#ifdef CONFIG_MMC_YL_PARAMS
-extern int yl_params_init(struct mmc_card *card);
-#endif
+/* chenjian add for mmc info start */
+static ssize_t name_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf) {
+//FixMe: add device info here
+	char manfid_buf[50];
+        char type_buf[50];
+	char hynix[]="H4G1d";
+	char samsung[]="N5XZMB";	
+	char sandisk[]="SEM04G";	
+	char toshiba[]="TOSHIBA";//need to change for toshiba MCP	
+	 
+	pr_info("emmc_manfid :0x%x\n",emmc_manfid);
+        pr_info("emmc_prod_name :%s\n",emmc_prod_name);
+
+/*
+      	#define CID_MANFID_SANDISK 0x2
+      	#define CID_MANFID_TOSHIBA 0x11
+      	#define CID_MANFID_MICRON 0x13
+      	#define CID_MANFID_SAMSUNG 0x15
+      	#define CID_MANFID_HYNIX 0x90
+*/ 
+	switch(emmc_manfid) {
+        case CID_MANFID_SANDISK:
+		sprintf(manfid_buf,"SANDISK");
+		break;
+	case CID_MANFID_TOSHIBA:
+	 	sprintf(manfid_buf,"TOSHIBA");
+	 	break;
+	case CID_MANFID_MICRON:
+	 	sprintf(manfid_buf,"MICRON");
+	 	break;	  
+	case CID_MANFID_SAMSUNG:
+	 	sprintf(manfid_buf,"SAMSUNG");
+	 	break;		
+	case CID_MANFID_HYNIX:
+	 	sprintf(manfid_buf,"HYNIX");
+	 	break;			   
+	default:
+	 	sprintf(manfid_buf,"manfid:0x%x",emmc_manfid);
+		break;
+	}
+
+	if(!strncmp(emmc_prod_name,hynix,2)){	 	    
+	 	sprintf(type_buf,"H9TP32A4GDBCPR-KGM");
+	}
+	else if(!strncmp(emmc_prod_name,samsung,2)){	 	    
+	 	sprintf(type_buf,"KMN5X000ZM-B209");
+	}
+	else if(!strncmp(emmc_prod_name,sandisk,2)){	 	    
+	 	sprintf(type_buf,"SD7DP24F-4G");
+	}
+	else if(!strncmp(emmc_prod_name,toshiba,2)){	 	    
+	 	sprintf(type_buf,"TYC0FH121597RA"); //maybe need to change for toshiba MCP	
+	}
+	else{
+                sprintf(type_buf,"emmc type:%s",emmc_prod_name);
+	}
+	  
+	return sprintf(buf,"%s:%s\n", manfid_buf,type_buf);
+}	 
+
+static struct kobj_attribute name_show_attr = { 
+	.attr = {
+	        .name = "name",
+	        .mode = S_IRUGO, 
+	},
+	.show = &name_show, 
+};
+
+static struct attribute *properties_attrs[] = {
+       &name_show_attr.attr,
+       NULL
+};
+
+static struct attribute_group properties_attr_group = {
+       .attrs = properties_attrs,
+};
+
+static void device_info_show(void)
+{
+	 int ret=0;
+	 struct kobject *properties_kobj;
+
+	 properties_kobj = kobject_create_and_add("emmc_info", NULL);
+	 if (properties_kobj)
+	  	ret = sysfs_create_group(properties_kobj, &properties_attr_group);
+	 if (!properties_kobj || ret)
+	  pr_err("failed to create emmc_info\n"); 
+}  
+/*chenjian add for mmc info end*/ 
+
 static int mmc_blk_probe(struct mmc_card *card)
 {
 	struct mmc_blk_data *md, *part_md;
@@ -3313,12 +3406,6 @@ static int mmc_blk_probe(struct mmc_card *card)
 #ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
 	mmc_set_bus_resume_policy(card->host, 1);
 #endif
-#ifdef CONFIG_MMC_YL_PARAMS
-	if (!strcmp(md->disk->disk_name, "mmcblk0")) {
-		if (yl_params_init(card))
-			pr_err("%s: call yl_params_init failed!\n", __func__);
-	}
-#endif
 	if (mmc_add_disk(md))
 		goto out;
 
@@ -3326,6 +3413,18 @@ static int mmc_blk_probe(struct mmc_card *card)
 		if (mmc_add_disk(part_md))
 			goto out;
 	}
+
+	/* chenjian add for mmc info start */
+	if(start_flag){
+		pr_info("%s:register emmc_info sys node\n",__func__);
+		emmc_manfid=card->cid.manfid;
+		memset(emmc_prod_name,0,sizeof(emmc_prod_name));
+		strcpy(emmc_prod_name,mmc_card_name(card));
+       		device_info_show();
+       		start_flag=0;
+	}
+	/* chenjian add for mmc info end */
+
 	return 0;
 
  out:
@@ -3427,7 +3526,6 @@ static int mmc_blk_resume(struct mmc_card *card)
 			mmc_queue_resume(&part_md->queue);
 		}
 	}
-
 	return 0;
 }
 #else

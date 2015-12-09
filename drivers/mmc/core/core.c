@@ -3355,6 +3355,7 @@ int mmc_detect_card_removed(struct mmc_host *host)
 	return ret;
 }
 EXPORT_SYMBOL(mmc_detect_card_removed);
+static  int max_retry = 11;
 
 void mmc_rescan(struct work_struct *work)
 {
@@ -3428,8 +3429,20 @@ void mmc_rescan(struct work_struct *work)
 	if (extend_wakelock && !host->rescan_disable)
 		wake_lock_timeout(&host->detect_wake_lock, HZ / 2);
 
-	if (host->caps & MMC_CAP_NEEDS_POLL)
-		mmc_schedule_delayed_work(&host->detect, HZ);
+	//add by lidan for sd card hotplug
+	max_retry--;
+ 	 if( max_retry > 0) //max try 10 times to open file
+	{
+  		mmc_schedule_delayed_work(&host->detect, HZ);
+	}else
+	 {
+		max_retry=11;
+	}
+	printk("mmc_rescan -----max_retry=%d\n",max_retry );
+	//add by lidan for sd card hotplug
+
+	//if (host->caps & MMC_CAP_NEEDS_POLL)
+	//	mmc_schedule_delayed_work(&host->detect, HZ);
 }
 
 void mmc_start_host(struct mmc_host *host)

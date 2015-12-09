@@ -22,6 +22,7 @@
 #include <linux/printk.h>
 #include <linux/list.h>
 #include <linux/pinctrl/consumer.h>
+#include <linux/delay.h>
 
 /* #define CONFIG_GPIO_FLASH_DEBUG */
 #undef CDBG
@@ -64,6 +65,29 @@ static struct of_device_id led_gpio_flash_of_match[] = {
 	{},
 };
 
+static void led_ktd262_brightness_set(struct led_classdev *led_cdev,int count)
+{
+	int i = 0;
+	unsigned long flags;
+	struct led_gpio_flash_data *flash_led =
+	    container_of(led_cdev, struct led_gpio_flash_data, cdev);
+
+	pr_err("tanyijun %s %d count = %d \n",__func__,__LINE__,count);
+
+	local_irq_save(flags);
+	gpio_direction_output(flash_led->flash_en, 0);
+	
+	for(i=0;i<count;i++)
+	{
+		gpio_direction_output(flash_led->flash_now, 0);
+		udelay(120);
+		gpio_direction_output(flash_led->flash_now, 1);
+		udelay(120);
+	}
+	local_irq_restore(flags);
+	
+}
+
 static void led_gpio_brightness_set(struct led_classdev *led_cdev,
 				    enum led_brightness value)
 {
@@ -75,33 +99,44 @@ static void led_gpio_brightness_set(struct led_classdev *led_cdev,
 	int flash_en = 0, flash_now = 0;
 
 	if (brightness > LED_HALF) {
-		flash_en =
-			flash_led->ctrl_seq[FLASH_EN].flash_on_val;
-		flash_now =
-			flash_led->ctrl_seq[FLASH_NOW].flash_on_val;
+		led_ktd262_brightness_set(led_cdev,16);
 	} else if (brightness > LED_OFF) {
 		flash_en =
 			flash_led->ctrl_seq[FLASH_EN].torch_on_val;
 		flash_now =
 			flash_led->ctrl_seq[FLASH_NOW].torch_on_val;
-	} else {
-		flash_en = 0;
-		flash_now = 0;
-	}
-	CDBG("%s:flash_en=%d, flash_now=%d\n", __func__, flash_en, flash_now);
+		
+		rc = gpio_direction_output(flash_led->flash_en, flash_en);
+		if (rc) {
+			pr_err("%s: Failed to set gpio %d\n", __func__,
+			       flash_led->flash_en);
+			goto err;
+		}
+		rc = gpio_direction_output(flash_led->flash_now, flash_now);
+		if (rc) {
+			pr_err("%s: Failed to set gpio %d\n", __func__,
+			       flash_led->flash_now);
+			goto err;
+		}
+ 	} else {
+			flash_en = 0;
+  		        flash_now = 0;
 
-	rc = gpio_direction_output(flash_led->flash_en, flash_en);
-	if (rc) {
-		pr_err("%s: Failed to set gpio %d\n", __func__,
-		       flash_led->flash_en);
-		goto err;
+			rc = gpio_direction_output(flash_led->flash_en, flash_en);
+			if (rc) {
+				pr_err("%s: Failed to set gpio %d\n", __func__,
+				       flash_led->flash_en);
+				goto err;
+			}
+			rc = gpio_direction_output(flash_led->flash_now, flash_now);
+			if (rc) {
+				pr_err("%s: Failed to set gpio %d\n", __func__,
+				       flash_led->flash_now);
+				goto err;
+			}
+			udelay(650);
 	}
-	rc = gpio_direction_output(flash_led->flash_now, flash_now);
-	if (rc) {
-		pr_err("%s: Failed to set gpio %d\n", __func__,
-		       flash_led->flash_now);
-		goto err;
-	}
+
 	flash_led->brightness = brightness;
 err:
 	return;
@@ -145,7 +180,7 @@ int led_gpio_flash_probe(struct platform_device *pdev)
 	}
 
 	flash_led->gpio_state_default = pinctrl_lookup_state(flash_led->pinctrl,
-		"flash_default");
+		"camera_flash_ktd262_default");
 	if (IS_ERR(flash_led->gpio_state_default)) {
 		pr_err("%s:can not get active pinstate\n", __func__);
 		return -EINVAL;

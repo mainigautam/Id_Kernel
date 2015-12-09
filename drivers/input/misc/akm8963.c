@@ -467,7 +467,10 @@ static int AKECS_GetData_Poll(
 
 	/* Check ST bit */
 	if (!(AKM_DRDY_IS_HIGH(buffer[0])))
+	{
 		dev_dbg(&akm->i2c->dev, "DRDY is low. Use last value.\n");
+		return 0;
+	}
 
 	/* Read rest data */
 	buffer[1] = AKM_REG_STATUS + 1;
@@ -890,7 +893,8 @@ static int akm_enable_set(struct sensors_classdev *sensors_cdev,
 			if (akm->delay[MAG_DATA_FLAG] <
 					MAX_SNG_MEASURE_SUPPORTED) {
 				AKECS_SetMode(akm,
-					AK8963_MODE_CONT2_MEASURE);
+						AK8963_MODE_CONT2_MEASURE |
+						AKM8963_BIT_OP_16);
 				akm->use_sng_measure = false;
 			} else {
 				AKECS_SetMode(akm,
@@ -1908,7 +1912,7 @@ int akm8963_compass_probe(
 		struct i2c_client *i2c,
 		const struct i2c_device_id *id)
 {
-	struct akm8963_platform_data *pdata = NULL;
+	struct akm8963_platform_data *pdata;
 	int err = 0;
 	int i;
 

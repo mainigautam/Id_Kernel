@@ -774,6 +774,49 @@ static ssize_t store_polling(struct device *dev,
 	return count;
 }
 
+static ssize_t show_detection(struct device *dev,
+        struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+
+   	if (!host)
+       return -EINVAL;
+
+    return sprintf(buf, "%d\n", host->slot.detection);
+}
+
+static ssize_t store_detection(struct device *dev,
+        struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+    unsigned long value;
+
+    if (!host || kstrtoul(buf, 0, &value))
+        return -EINVAL;
+	
+	//if (value != host->slot.detection) 
+	{
+		host->slot.detection = value;
+		mmc_gpio_detection(host);
+    	pr_info("%s: xiangsheng ---- sd detection %d -> %ld\n",__func__, host->slot.detection, value);
+	}
+
+    return count;
+}
+
+static DEVICE_ATTR(detection, S_IRUGO | S_IWUSR | S_IWGRP,
+        show_detection, store_detection);
+
+static struct attribute *mmc_gpio_attrs[] = {
+    &dev_attr_detection.attr,
+    NULL,
+};
+
+static struct attribute_group mmc_gpio_attr_grp = {
+    .attrs = mmc_gpio_attrs,
+};
+
+
 DEVICE_ATTR(enable, S_IRUGO | S_IWUSR,
 		show_enable, store_enable);
 DEVICE_ATTR(polling_interval, S_IRUGO | S_IWUSR,
@@ -904,6 +947,11 @@ int mmc_add_host(struct mmc_host *host)
 	if (err)
 		pr_err("%s: failed to create sysfs group with err %d\n",
 							 __func__, err);
+
+	err = sysfs_create_group(&host->class_dev.kobj, &mmc_gpio_attr_grp);
+    if (err)
+        pr_err("%s: failed to detection sysfs group with err %d\n",
+                __func__, err);	
 
 	mmc_start_host(host);
 	if (!(host->pm_flags & MMC_PM_IGNORE_PM_NOTIFY))

@@ -412,6 +412,10 @@ struct input_keymap_entry {
 #define KEY_F22			192
 #define KEY_F23			193
 #define KEY_F24			194
+//zhongzhu add start
+#define KEY_FP1			195
+#define KEY_FP2			196
+//zhongzhu add end
 
 #define KEY_PLAYCD		200
 #define KEY_PAUSECD		201

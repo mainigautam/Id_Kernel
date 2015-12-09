@@ -134,6 +134,13 @@ config LEDS_COBALT_RAQ
 	help
 	  This option enables support for the Cobalt Raq series LEDs.
 
+config LEDS_BREATH_LED
+	tristate "BREATH LED"
+    default I2C
+	help
+	  This option enables support for breath LED.
+        
+
 config LEDS_SUNFIRE
 	tristate "LED support for SunFire servers."
 	depends on LEDS_CLASS

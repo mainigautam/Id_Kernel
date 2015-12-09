@@ -23,6 +23,7 @@ struct mmc_gpio {
 	char *ro_label;
 	bool status;
 	char cd_label[0]; /* Must be last entry */
+	bool detection;
 };
 
 static int mmc_gpio_get_status(struct mmc_host *host)
@@ -75,6 +76,43 @@ static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 out:
 
 	return IRQ_HANDLED;
+}
+
+int mmc_gpio_detection(struct mmc_host *host)
+{
+	/* Schedule a card detection after a debounce timeout */
+	//struct mmc_host *host = dev_id;
+	//struct mmc_gpio *ctx = host->slot.handler_priv;
+	//int status;
+
+	/*
+	 * In case host->ops are not yet initialized return immediately.
+	 * The card will get detected later when host driver calls
+	 * mmc_add_host() after host->ops are initialized.
+	 */
+	if (!host->ops)
+		return -EINVAL;
+#if 0
+	if (host->ops->card_event)
+		host->ops->card_event(host);
+
+	status = mmc_gpio_get_status(host);
+	if (unlikely(status < 0))
+		return -EINVAL;
+
+	if (status ^ ctx->status) {
+		pr_info("%s: xiangsheng --- slot status change detected (%d -> %d), GPIO_ACTIVE_%s\n",
+				mmc_hostname(host), ctx->status, status,
+				(host->caps2 & MMC_CAP2_CD_ACTIVE_HIGH) ?
+				"HIGH" : "LOW");
+		ctx->status = status;
+#endif
+		/* Schedule a card detection after a debounce timeout */
+		mmc_detect_change(host, msecs_to_jiffies(200));
+	
+	//}
+
+	return 0;
 }
 
 static int mmc_gpio_alloc(struct mmc_host *host)

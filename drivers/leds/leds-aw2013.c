@@ -21,7 +21,6 @@
 #include <linux/slab.h>
 #include <linux/regulator/consumer.h>
 #include <linux/leds-aw2013.h>
-#include <linux/of_gpio.h>
 
 /* register address */
 #define AW_REG_RESET			0x00
@@ -94,13 +93,11 @@ static int aw2013_power_on(struct aw2013_led *led, bool on)
 			return rc;
 		}
 
-		if (led->pdata->awgpio <= 0)  {
-			rc = regulator_enable(led->vcc);
-			if (rc) {
-				dev_err(&led->client->dev,
-						"Regulator vcc enable failed rc=%d\n", rc);
-				goto fail_enable_reg;
-			}
+		rc = regulator_enable(led->vcc);
+		if (rc) {
+			dev_err(&led->client->dev,
+				"Regulator vcc enable failed rc=%d\n", rc);
+			goto fail_enable_reg;
 		}
 		led->poweron = true;
 	} else {
@@ -111,13 +108,11 @@ static int aw2013_power_on(struct aw2013_led *led, bool on)
 			return rc;
 		}
 
-		if (led->pdata->awgpio <= 0)  {
-			rc = regulator_disable(led->vcc);
-			if (rc) {
-				dev_err(&led->client->dev,
-						"Regulator vcc disable failed rc=%d\n", rc);
-				goto fail_disable_reg;
-			}
+		rc = regulator_disable(led->vcc);
+		if (rc) {
+			dev_err(&led->client->dev,
+				"Regulator vcc disable failed rc=%d\n", rc);
+			goto fail_disable_reg;
 		}
 		led->poweron = false;
 	}
@@ -138,35 +133,6 @@ fail_disable_reg:
 			"Regulator vdd enable failed rc=%d\n", rc);
 
 	return rc;
-}
-
-static int aw2013_configure_gpio(struct aw2013_led *led, bool on)
-{
-	struct pinctrl *pinctrl;
-	struct pinctrl_state *pinctrl_state;
-	int rc;
-
-	pinctrl = devm_pinctrl_get(&led->client->dev);
-	if (IS_ERR_OR_NULL(pinctrl)) {
-		dev_err(&led->client->dev,
-				"Failed to get pinctrl\n");
-		return -EFAULT;
-	}
-	pinctrl_state = pinctrl_lookup_state(pinctrl,
-			on ? "aw2013_led_default" : "aw2013_led_suspend");
-	if (IS_ERR_OR_NULL(pinctrl_state)) {
-		dev_err(&led->client->dev,
-				"Failed to look up pinctrl state\n");
-		return -EFAULT;
-	}
-	rc = pinctrl_select_state(pinctrl, pinctrl_state);
-	if (rc) {
-		dev_err(&led->client->dev,
-				"Failed to select pinctrl state\n");
-		return -EIO;
-	}
-
-	return 0;
 }
 
 static int aw2013_power_init(struct aw2013_led *led, bool on)
@@ -193,31 +159,21 @@ static int aw2013_power_init(struct aw2013_led *led, bool on)
 			}
 		}
 
-		if (led->pdata->awgpio > 0) {
-			rc = aw2013_configure_gpio(led, on);
-			if (rc) {
-				dev_dbg(&led->client->dev,
-						"Failed to configure GPIO: %d\n", rc);
-			}
-			gpio_request(led->pdata->awgpio, "aw2013-gpio");
-			gpio_direction_output(led->pdata->awgpio, 1);
-		} else {
-			led->vcc = regulator_get(&led->client->dev, "vcc");
-			if (IS_ERR(led->vcc)) {
-				rc = PTR_ERR(led->vcc);
-				dev_err(&led->client->dev,
-						"Regulator get failed vcc rc=%d\n", rc);
-				goto reg_vdd_set_vtg;
-			}
+		led->vcc = regulator_get(&led->client->dev, "vcc");
+		if (IS_ERR(led->vcc)) {
+			rc = PTR_ERR(led->vcc);
+			dev_err(&led->client->dev,
+				"Regulator get failed vcc rc=%d\n", rc);
+			goto reg_vdd_set_vtg;
+		}
 
-			if (regulator_count_voltages(led->vcc) > 0) {
-				rc = regulator_set_voltage(led->vcc, AW2013_VI2C_MIN_UV,
-						AW2013_VI2C_MAX_UV);
-				if (rc) {
-					dev_err(&led->client->dev,
-							"Regulator set_vtg failed vcc rc=%d\n", rc);
-					goto reg_vcc_put;
-				}
+		if (regulator_count_voltages(led->vcc) > 0) {
+			rc = regulator_set_voltage(led->vcc, AW2013_VI2C_MIN_UV,
+						   AW2013_VI2C_MAX_UV);
+			if (rc) {
+				dev_err(&led->client->dev,
+				"Regulator set_vtg failed vcc rc=%d\n", rc);
+				goto reg_vcc_put;
 			}
 		}
 	} else {
@@ -226,12 +182,10 @@ static int aw2013_power_init(struct aw2013_led *led, bool on)
 
 		regulator_put(led->vdd);
 
-		if (!led->pdata->awgpio <= 0) {
-			if (regulator_count_voltages(led->vcc) > 0)
-				regulator_set_voltage(led->vcc, 0, AW2013_VI2C_MAX_UV);
+		if (regulator_count_voltages(led->vcc) > 0)
+			regulator_set_voltage(led->vcc, 0, AW2013_VI2C_MAX_UV);
 
-			regulator_put(led->vcc);
-		}
+		regulator_put(led->vcc);
 	}
 	return 0;
 
@@ -307,8 +261,7 @@ static void aw2013_led_blink_set(struct aw2013_led *led, unsigned long blinking)
 		}
 	}
 
-	if (!led->cdev.brightness)
-		led->cdev.brightness = blinking ? led->cdev.max_brightness : 0;
+	led->cdev.brightness = blinking ? led->cdev.max_brightness : 0;
 
 	if (blinking > 0) {
 		aw2013_write(led, AW_REG_GLOBAL_CONTROL,
@@ -325,32 +278,10 @@ static void aw2013_led_blink_set(struct aw2013_led *led, unsigned long blinking)
 			led->pdata->fall_time_ms << 4 |
 			led->pdata->off_time_ms);
 		aw2013_read(led, AW_REG_LED_ENABLE, &val);
-                // sync up the blinking by pulling them all down first
-		aw2013_write(led, AW_REG_GLOBAL_CONTROL,
-			0);
-		aw2013_write(led, AW_REG_LED_ENABLE, 0);
-		msleep(50);
-		aw2013_write(led, AW_REG_GLOBAL_CONTROL,
-			AW_LED_MOUDLE_ENABLE_MASK);
 		aw2013_write(led, AW_REG_LED_ENABLE, val | (1 << led->id));
 	} else {
 		aw2013_read(led, AW_REG_LED_ENABLE, &val);
 		aw2013_write(led, AW_REG_LED_ENABLE, val & (~(1 << led->id)));
-		if (led->cdev.brightness) {
-			// Disabling blink doesn't shut down the LED, put it
-			// back up after clearing the timers
-			if (led->cdev.brightness > led->cdev.max_brightness)
-				led->cdev.brightness = led->cdev.max_brightness;
-			aw2013_write(led, AW_REG_GLOBAL_CONTROL,
-					AW_LED_MOUDLE_ENABLE_MASK);
-			aw2013_write(led, AW_REG_LED_CONFIG_BASE + led->id,
-					led->pdata->max_current);
-			aw2013_write(led, AW_REG_LED_BRIGHTNESS_BASE + led->id,
-					led->cdev.brightness);
-			aw2013_write(led, AW_REG_LED_BRIGHTNESS_BASE + led->id,
-				led->cdev.brightness);
-			aw2013_write(led, AW_REG_LED_ENABLE, val);
-		}
 	}
 
 	aw2013_read(led, AW_REG_LED_ENABLE, &val);
@@ -534,12 +465,6 @@ static int aw2013_led_parse_child_node(struct aw2013_led *led_array,
 			dev_err(&led->client->dev,
 				"Failure reading max-current, rc = %d\n", rc);
 			goto free_pdata;
-		}
-
-		rc = of_property_read_u32(temp, "aw2013,gpio",
-			&led->pdata->awgpio);
-		if (rc < 0) {
-			led->pdata->awgpio = 0;
 		}
 
 		rc = of_property_read_u32(temp, "aw2013,rise-time-ms",

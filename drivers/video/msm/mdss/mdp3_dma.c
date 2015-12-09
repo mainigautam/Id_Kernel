@@ -16,6 +16,7 @@
 #include "mdp3.h"
 #include "mdp3_dma.h"
 #include "mdp3_hwio.h"
+#include "mdss_debug.h"
 
 #define DMA_STOP_POLL_SLEEP_US 1000
 #define DMA_STOP_POLL_TIMEOUT_US 200000
@@ -345,10 +346,6 @@ static int mdp3_dmap_config(struct mdp3_dma *dma,
 
 	dma->source_config = *source_config;
 	dma->output_config = *output_config;
-	dma->roi.w = dma->source_config.width;
-	dma->roi.h = dma->source_config.height;
-	dma->roi.x = dma->source_config.x;
-	dma->roi.y = dma->source_config.y;
 	mdp3_irq_enable(MDP3_INTR_LCDC_UNDERFLOW);
 	mdp3_dma_callback_setup(dma);
 	return 0;
@@ -452,46 +449,7 @@ static int mdp3_dmap_cursor_config(struct mdp3_dma *dma,
 	return 0;
 }
 
-static void mdp3_ccs_update(struct mdp3_dma *dma)
-{
-	u32 cc_config;
-	int updated = 0;
-
-	cc_config = MDP3_REG_READ(MDP3_REG_DMA_P_COLOR_CORRECT_CONFIG);
-
-	if (dma->ccs_config.ccs_dirty) {
-		cc_config &= DMA_CCS_CONFIG_MASK;
-		if (dma->ccs_config.ccs_enable)
-			cc_config |= BIT(3);
-		else
-			cc_config &= ~BIT(3);
-		cc_config |= dma->ccs_config.ccs_sel << 5;
-		cc_config |= dma->ccs_config.pre_bias_sel << 6;
-		cc_config |= dma->ccs_config.post_bias_sel << 7;
-		cc_config |= dma->ccs_config.pre_limit_sel << 8;
-		cc_config |= dma->ccs_config.post_limit_sel << 9;
-		dma->ccs_config.ccs_dirty = false;
-		updated = 1;
-	}
-
-	if (dma->lut_config.lut_dirty) {
-		cc_config &= DMA_LUT_CONFIG_MASK;
-		cc_config |= dma->lut_config.lut_enable;
-		cc_config |= dma->lut_config.lut_position << 4;
-		cc_config |= dma->lut_config.lut_sel << 10;
-		dma->lut_config.lut_dirty = false;
-		updated = 1;
-	}
-	if (updated) {
-		MDP3_REG_WRITE(MDP3_REG_DMA_P_COLOR_CORRECT_CONFIG, cc_config);
-
-		/* Make sure ccs configuration update is done before continuing
-		with the DMA transfer */
-		wmb();
-	}
-}
-
-static int mdp3_dmap_ccs_config(struct mdp3_dma *dma,
+static int mdp3_dmap_ccs_config_internal(struct mdp3_dma *dma,
 			struct mdp3_dma_color_correct_config *config,
 			struct mdp3_dma_ccs *ccs)
 {
@@ -542,10 +500,77 @@ static int mdp3_dmap_ccs_config(struct mdp3_dma *dma,
 			addr += 4;
 		}
 	}
+	return 0;
+}
+
+static void mdp3_ccs_update(struct mdp3_dma *dma, bool from_kickoff)
+{
+	u32 cc_config;
+	bool ccs_updated = false, lut_updated = false;
+	struct mdp3_dma_ccs ccs;
+
+	cc_config = MDP3_REG_READ(MDP3_REG_DMA_P_COLOR_CORRECT_CONFIG);
+
+	if (dma->ccs_config.ccs_dirty) {
+		cc_config &= DMA_CCS_CONFIG_MASK;
+		if (dma->ccs_config.ccs_enable)
+			cc_config |= BIT(3);
+		else
+			cc_config &= ~BIT(3);
+		cc_config |= dma->ccs_config.ccs_sel << 5;
+		cc_config |= dma->ccs_config.pre_bias_sel << 6;
+		cc_config |= dma->ccs_config.post_bias_sel << 7;
+		cc_config |= dma->ccs_config.pre_limit_sel << 8;
+		cc_config |= dma->ccs_config.post_limit_sel << 9;
+		/*
+		 * CCS dirty flag should be reset when call is made from frame
+		 * kickoff, or else upon resume the flag would be dirty and LUT
+		 * config could call this function thereby causing no register
+		 * programming for CCS, which will cause screen to go dark
+		 */
+		if (from_kickoff)
+			dma->ccs_config.ccs_dirty = false;
+		ccs_updated = true;
+	}
+
+	if (dma->lut_config.lut_dirty) {
+		cc_config &= DMA_LUT_CONFIG_MASK;
+		cc_config |= dma->lut_config.lut_enable;
+		cc_config |= dma->lut_config.lut_position << 4;
+		cc_config |= dma->lut_config.lut_sel << 10;
+		dma->lut_config.lut_dirty = false;
+		lut_updated = true;
+	}
+
+	if (ccs_updated && from_kickoff) {
+		ccs.mv = dma->ccs_cache.csc_data.csc_mv;
+		ccs.pre_bv = dma->ccs_cache.csc_data.csc_pre_bv;
+		ccs.post_bv = dma->ccs_cache.csc_data.csc_post_bv;
+		ccs.pre_lv = dma->ccs_cache.csc_data.csc_pre_lv;
+		ccs.post_lv = dma->ccs_cache.csc_data.csc_post_lv;
+		mdp3_dmap_ccs_config_internal(dma, &dma->ccs_config, &ccs);
+	}
+
+	if (lut_updated || ccs_updated) {
+		MDP3_REG_WRITE(MDP3_REG_DMA_P_COLOR_CORRECT_CONFIG, cc_config);
+		/*
+		 * Make sure ccs configuration update is done before continuing
+		 * with the DMA transfer
+		 */
+		wmb();
+	}
+}
+
+static int mdp3_dmap_ccs_config(struct mdp3_dma *dma,
+			struct mdp3_dma_color_correct_config *config,
+			struct mdp3_dma_ccs *ccs)
+{
+        mdp3_dmap_ccs_config_internal(dma, config, ccs);
+
 	dma->ccs_config = *config;
 
 	if (dma->output_config.out_sel != MDP3_DMA_OUTPUT_SEL_DSI_CMD)
-		mdp3_ccs_update(dma);
+		mdp3_ccs_update(dma, false);
 
 	return 0;
 }
@@ -574,7 +599,7 @@ static int mdp3_dmap_lut_config(struct mdp3_dma *dma,
 	dma->lut_config = *config;
 
 	if (dma->output_config.out_sel != MDP3_DMA_OUTPUT_SEL_DSI_CMD)
-		mdp3_ccs_update(dma);
+		mdp3_ccs_update(dma, false);
 
 	return 0;
 }
@@ -634,17 +659,20 @@ static int mdp3_dmap_update(struct mdp3_dma *dma, void *buf,
 	struct mdss_panel_data *panel;
 	int rc = 0;
 
+	ATRACE_BEGIN(__func__);
 	pr_debug("mdp3_dmap_update\n");
 
 	if (dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_DSI_CMD) {
 		cb_type = MDP3_DMA_CALLBACK_TYPE_DMA_DONE;
 		if (intf->active) {
+			ATRACE_BEGIN("mdp3_wait_for_dma_comp");
 			rc = wait_for_completion_timeout(&dma->dma_comp,
 				KOFF_TIMEOUT);
 			if (rc <= 0) {
 				WARN(1, "cmd kickoff timed out (%d)\n", rc);
 				rc = -1;
 			}
+			ATRACE_END("mdp3_wait_for_dma_comp");
 		}
 	}
 	if (dma->update_src_cfg) {
@@ -654,9 +682,12 @@ static int mdp3_dmap_update(struct mdp3_dma *dma, void *buf,
 		dma->dma_config_source(dma);
 		if (data) {
 			panel = (struct mdss_panel_data *)data;
-			if (panel->event_handler)
+			if (panel->event_handler) {
 				panel->event_handler(panel,
 					MDSS_EVENT_ENABLE_PARTIAL_ROI, NULL);
+				panel->event_handler(panel,
+					MDSS_EVENT_DSI_STREAM_SIZE, NULL);
+			}
 		}
 		dma->update_src_cfg = false;
 	}
@@ -665,8 +696,8 @@ static int mdp3_dmap_update(struct mdp3_dma *dma, void *buf,
 			dma->roi.y * dma->source_config.stride +
 			dma->roi.x * dma_bpp(dma->source_config.format)));
 	dma->source_config.buf = (int)buf;
+	mdp3_ccs_update(dma, true);
 	if (dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_DSI_CMD) {
-		mdp3_ccs_update(dma);
 		MDP3_REG_WRITE(MDP3_REG_DMA_P_START, 1);
 	}
 
@@ -684,12 +715,15 @@ static int mdp3_dmap_update(struct mdp3_dma *dma, void *buf,
 	mdp3_dma_callback_enable(dma, cb_type);
 	pr_debug("mdp3_dmap_update wait for vsync_comp in\n");
 	if (dma->output_config.out_sel == MDP3_DMA_OUTPUT_SEL_DSI_VIDEO) {
+		ATRACE_BEGIN("mdp3_wait_for_vsync_comp");
 		rc = wait_for_completion_timeout(&dma->vsync_comp,
 			KOFF_TIMEOUT);
 		if (rc <= 0)
 			rc = -1;
+		ATRACE_END("mdp3_wait_for_vsync_comp");
 	}
 	pr_debug("mdp3_dmap_update wait for vsync_comp out\n");
+	ATRACE_END(__func__);
 	return rc;
 }
 

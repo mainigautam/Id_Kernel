@@ -39,6 +39,16 @@
 #define AP3426_LIGHT_INPUT_NAME		"ap3426-light"
 #define AP3426_PROXIMITY_INPUT_NAME	"ap3426-proximity"
 
+#define PLSENSOR_INFO
+
+#ifdef PLSENSOR_INFO
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+#include <linux/ctype.h>
+static char *psensor_info;
+static char *lsensor_info;
+#endif
+
 /* AP3426 registers */
 #define AP3426_REG_CONFIG		0x00
 #define AP3426_REG_INT_FLAG		0x01
@@ -182,7 +192,8 @@ static int sensitivity_table[] = { 3000, 400, 100, 1 };
 static int pmt_table[] = { 5, 10, 14, 19 }; /* 5.0 9.6, 14.1 18.7 */
 
 /* PS distance table */
-static int ps_distance_table[] = { 887, 282, 111, 78, 53, 46, };
+//static int ps_distance_table[] = { 887, 282, 111, 78, 53, 46, };
+static int ps_distance_table[] = { 887, 500, 400, 300, 200, 100, };
 
 static struct sensors_classdev als_cdev = {
 	.name = "ap3426-light",
@@ -637,6 +648,7 @@ static int ap3426_init_device(struct ap3426_data *di)
 		return rc;
 	}
 
+#if 1
 	/* Set calibration parameter low byte */
 	rc = regmap_write(di->regmap, AP3426_REG_PS_CAL_L,
 			PS_LOW_BYTE(di->bias));
@@ -654,6 +666,7 @@ static int ap3426_init_device(struct ap3426_data *di)
 				AP3426_REG_PS_CAL_H);
 		return rc;
 	}
+#endif
 
 	dev_dbg(&di->i2c->dev, "ap3426 initialize sucessful\n");
 
@@ -806,6 +819,7 @@ static int ap3426_process_data(struct ap3426_data *di, int als_ps)
 	u8 ps_data[4];
 	int i;
 	int distance;
+//	static bool once_init = true;
 
 	timestamp = ktime_get_boottime();
 
@@ -861,6 +875,8 @@ static int ap3426_process_data(struct ap3426_data *di, int als_ps)
 
 		dev_dbg(&di->i2c->dev, "ps data: 0x%x 0x%x\n",
 				ps_data[0], ps_data[1]);
+//		pr_debug("ps data: 0x%x 0x%x\n",
+//				ps_data[0], ps_data[1]);
 
 		tmp = ps_data[0] | (ps_data[1] << 8);
 		for (i = 0; i < ARRAY_SIZE(ps_distance_table); i++) {
@@ -868,10 +884,12 @@ static int ap3426_process_data(struct ap3426_data *di, int als_ps)
 				break;
 		}
 		distance = i;
-
+		//pr_err("[david] == i = %d\n", distance);
 		dev_dbg(&di->i2c->dev, "reprt work ps_data:%d\n", tmp);
 
 		/* Report ps data */
+//		if (once_init != true)
+//		{
 		if (distance != di->last_ps) {
 			input_report_abs(di->input_proximity, ABS_DISTANCE,
 					distance);
@@ -881,7 +899,8 @@ static int ap3426_process_data(struct ap3426_data *di, int als_ps)
 					ktime_to_timespec(timestamp).tv_nsec);
 			input_sync(di->input_proximity);
 		}
-
+//		}
+//		once_init = false;
 		di->last_ps = distance;
 
 		/* lower threshold */
@@ -903,7 +922,10 @@ static int ap3426_process_data(struct ap3426_data *di, int als_ps)
 		ps_data[3] = PS_HIGH_BYTE(tmp);
 
 		dev_dbg(&di->i2c->dev, "ps threshold: 0x%x 0x%x 0x%x 0x%x\n",
-				ps_data[0], ps_data[1], ps_data[2], ps_data[3]);
+		ps_data[0], ps_data[1], ps_data[2], ps_data[3]);
+
+//		pr_err("ps threshold: 0x%x 0x%x 0x%x 0x%x\n",
+//				ps_data[0], ps_data[1], ps_data[2], ps_data[3]);
 
 		rc = regmap_bulk_write(di->regmap, AP3426_REG_PS_LOW_THRES_0,
 				ps_data, 4);
@@ -1402,41 +1424,6 @@ static int ap3426_cdev_als_flush(struct sensors_classdev *sensors_cdev)
 	return 0;
 }
 
-static inline void swap_at(u16 *x, u16 *y)
-{
-	u16 temp = *x;
-
-	*x = *y;
-	*y = temp;
-}
-
-static u16 ap3426_median_average(u16 *sample_data, int size)
-{
-	int i, j;
-	u32 sum = 0;
-	int start_index = 0;
-	int end_index = size - 1;
-	int average;
-	for (i = 0; i < size - 1; i++) {
-		for (j = i + 1; j < size; j++) {
-			if (sample_data[i] > sample_data[j]) {
-				 swap_at(&sample_data[i], &sample_data[j]);
-			}
-		}
-	}
-	// collect the median samples only (cut off first and last 2)
-	if (size > 4) {
-		start_index = 2;
-		end_index = size - 3;
-	}
-	for (i = start_index; i <= end_index; i++) {
-		sum += sample_data[i];
-	}
-	average = (u16) (sum / (end_index - start_index + 1));
-
-	return average;
-}
-
 /* This function should be called when sensor is disabled */
 static int ap3426_cdev_ps_calibrate(struct sensors_classdev *sensors_cdev,
 		int axis, int apply_now)
@@ -1445,12 +1432,12 @@ static int ap3426_cdev_ps_calibrate(struct sensors_classdev *sensors_cdev,
 	int power;
 	unsigned int config;
 	unsigned int interrupt;
-	u16 avg = 0;
-	u16 data[AP3426_CALIBRATE_SAMPLES];
+	u16 min = PS_DATA_MASK;
 	u8 ps_data[2];
-	int count = AP3426_CALIBRATE_SAMPLES + 1;
+	int count = AP3426_CALIBRATE_SAMPLES;
 	struct ap3426_data *di = container_of(sensors_cdev,
 			struct ap3426_data, ps_cdev);
+
 
 	if (axis != AXIS_BIAS)
 		return 0;
@@ -1541,20 +1528,20 @@ static int ap3426_cdev_ps_calibrate(struct sensors_classdev *sensors_cdev,
 			dev_err(&di->i2c->dev, "read PS data failed\n");
 			break;
 		}
-		data[count - 1] = (ps_data[1] << 8) | ps_data[0];
+		if (min > ((ps_data[1] << 8) | ps_data[0]))
+			min = (ps_data[1] << 8) | ps_data[0];
 	}
-	avg = ap3426_median_average(data, AP3426_CALIBRATE_SAMPLES);
-	dev_dbg(&di->i2c->dev, "calibrated average %d\n", avg);
+
 	if (!count) {
-		if (avg > (PS_DATA_MASK >> 1)) {
+		if (min > (PS_DATA_MASK >> 1)) {
 			dev_err(&di->i2c->dev, "ps data out of range, check if shield\n");
 			rc = -EINVAL;
 			goto exit_disable_ps;
 		}
 
 		if (apply_now) {
-			ps_data[0] = PS_LOW_BYTE(avg);
-			ps_data[1] = PS_HIGH_BYTE(avg);
+			ps_data[0] = PS_LOW_BYTE(min);
+			ps_data[1] = PS_HIGH_BYTE(min);
 			rc = regmap_bulk_write(di->regmap, AP3426_REG_PS_CAL_L,
 					ps_data, 2);
 			if (rc) {
@@ -1562,11 +1549,11 @@ static int ap3426_cdev_ps_calibrate(struct sensors_classdev *sensors_cdev,
 						AP3426_REG_PS_CAL_L, rc);
 				goto exit_disable_ps;
 			}
-			di->bias = avg;
+			di->bias = min;
 		}
 
 		snprintf(di->calibrate_buf, sizeof(di->calibrate_buf), "0,0,%d",
-				avg);
+				min);
 		dev_dbg(&di->i2c->dev, "result: %s\n", di->calibrate_buf);
 	} else {
 		dev_err(&di->i2c->dev, "calibration failed\n");
@@ -1711,12 +1698,39 @@ static ssize_t ap3426_register_store(struct device *dev,
 	return size;
 }
 
+static ssize_t ap3426_ps_rawdata_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct ap3426_data *di = dev_get_drvdata(dev);
+	int rc;
+	unsigned int tmp;
+	u8 ps_data[4];
+
+	rc = regmap_bulk_read(di->regmap, AP3426_REG_PS_DATA_LOW,
+			ps_data, 2);
+	if (rc) {
+		dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
+				AP3426_REG_PS_DATA_LOW, rc);
+		return 1;
+	}
+	
+	tmp = ps_data[0] | (ps_data[1] << 8);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", tmp);;
+}
+
 static DEVICE_ATTR(register, S_IWUSR | S_IRUGO,
 		ap3426_register_show,
 		ap3426_register_store);
 
+static DEVICE_ATTR(ps_rawdata, S_IWUSR | S_IRUGO,
+		ap3426_ps_rawdata_show,
+		NULL);
+		
+
 static struct attribute *ap3426_attr[] = {
 	&dev_attr_register.attr,
+	&dev_attr_ps_rawdata.attr,
 	NULL
 };
 
@@ -1724,13 +1738,102 @@ static const struct attribute_group ap3426_attr_group = {
 	.attrs = ap3426_attr,
 };
 
+#ifdef PLSENSOR_INFO
+static ssize_t name_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf) {
+
+   return sprintf(buf,"PSENSOR:%s LSENOSR:%s\n", psensor_info, lsensor_info);
+}
+
+static struct kobj_attribute name_show_attr = {
+ .attr = {
+        .name = "name",
+        .mode = S_IRUGO,
+        },
+    .show = &name_show,
+};
+
+static struct attribute *properties_attrs[] = {
+       &name_show_attr.attr,
+        NULL
+};
+
+static struct attribute_group properties_attr_group = {
+        .attrs = properties_attrs,
+};
+
+static void device_info_show(void)
+{
+        int ret;
+        struct kobject *properties_kobj;
+
+        properties_kobj = kobject_create_and_add("plsensor_info", NULL);
+        if (properties_kobj)
+                ret = sysfs_create_group(properties_kobj,
+                                &properties_attr_group);
+        if (!properties_kobj || ret)
+                printk(KERN_ERR "failed to create plsensor_info\n");
+}
+
+static void plsensor_property_create(void)
+{
+    static bool first_time = true;      // only first time to create property
+    if (first_time)
+    {
+        first_time = false;
+        device_info_show();
+    }
+}
+
+static void plsensor_save_info(struct ap3426_data *di)
+{
+
+        static char psensor_info_r[50];
+        static char lsensor_info_r[50];
+        char temp_info[50] = {0};
+        int cut_point;
+        int i;
+
+        strcpy(temp_info, di->ps_cdev.name);
+        cut_point = sizeof(temp_info);
+        strncpy(psensor_info_r, temp_info, cut_point);
+
+        // Uppercase for AP
+        for (i=0; i<strlen(psensor_info_r); i++)
+		psensor_info_r[i] = toupper(psensor_info_r[i]);
+
+        psensor_info = psensor_info_r;
+
+        printk(KERN_ERR "%s: psensor_info:%s\n", __func__, psensor_info);
+
+        strcpy(temp_info, di->als_cdev.name);
+        cut_point = sizeof(temp_info);
+        strncpy(lsensor_info_r, temp_info, cut_point);
+
+        // Uppercase for AP
+        for (i=0; i<strlen(lsensor_info_r); i++)
+		lsensor_info_r[i] = toupper(lsensor_info_r[i]);
+
+        lsensor_info = lsensor_info_r;
+
+        printk(KERN_ERR "%s: lsensor_info:%s\n", __func__, lsensor_info);
+}
+
+#endif
+
+
 static int ap3426_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
 {
 	struct ap3426_data *di;
 	int res = 0;
 
+//    	u8 ps_data[2];
+//	int tmp;
 	dev_dbg(&client->dev, "probing ap3426...\n");
+
+#ifdef PLSENSOR_INFO
+        plsensor_property_create();
+#endif
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev, "ap3426 i2c check failed.\n");
@@ -1895,6 +1998,27 @@ static int ap3426_probe(struct i2c_client *client,
 	sensor_power_config(&client->dev, power_config,
 			ARRAY_SIZE(power_config), false);
 	di->power_enabled = false;
+
+	#if 0
+    ap3426_enable_ps(di, 1);
+	mdelay(50);
+	regmap_bulk_read(di->regmap, AP3426_REG_PS_DATA_LOW,
+				ps_data, 2);
+	tmp = ps_data[0] | (ps_data[1] << 8);
+	if(tmp < 400)
+	{
+		pr_err("[david] ==1===%s====tmp:%d\n", __func__, tmp);
+		regmap_write(di->regmap, AP3426_REG_PS_CAL_L,
+			PS_LOW_BYTE(tmp));
+		regmap_write(di->regmap, AP3426_REG_PS_CAL_H,
+			PS_HIGH_BYTE(tmp));			
+	}
+	ap3426_enable_ps(di, 0);
+	#endif
+
+#ifdef PLSENSOR_INFO
+        plsensor_save_info(di);
+#endif
 
 	dev_info(&client->dev, "ap3426 successfully probed!\n");
 
