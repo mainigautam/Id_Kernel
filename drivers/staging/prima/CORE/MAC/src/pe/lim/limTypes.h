@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -51,6 +51,7 @@
 
 #include "limApi.h"
 #include "limDebug.h"
+#include "limTrace.h"
 #include "limSendSmeRspMessages.h"
 #include "sysGlobal.h"
 #include "dphGlobal.h"
@@ -166,6 +167,7 @@ enum eChannelChangeReasonCodes
     LIM_SWITCH_CHANNEL_JOIN,
     LIM_SWITCH_CHANNEL_OPERATION, // Generic change channel
     LIM_SWITCH_CHANNEL_CSA,
+    LIM_SWITCH_CHANNEL_SAP_ECSA,
 };
 
 typedef struct sLimAuthRspTimeout
@@ -208,8 +210,13 @@ typedef struct sLimMlmScanCnf
 {
     tSirResultCodes         resultCode;
     tANI_U16                scanResultLength;
-    tSirBssDescription      bssDescription[1];
     tANI_U8                 sessionId;
+    tSirBssDescription      bssDescription[1];
+    /*
+     * WARNING: Pls make bssDescription as last variable in struct
+     * tLimMlmScanCnf as it has ieFields followed after this bss
+     * description. Adding a variable after this corrupts the ieFields
+     */
 } tLimMlmScanCnf, *tpLimMlmScanCnf;
 
 typedef struct sLimScanResult
@@ -257,12 +264,20 @@ typedef struct sLimMlmAssocInd
 
 
     tAniBool               WmmStaInfoPresent;
+#ifdef WLAN_FEATURE_AP_HT40_24G
+    tAniBool               HT40MHzIntoPresent;
+#endif
 
     // Required for indicating the frames to upper layer
     tANI_U32             beaconLength;
     tANI_U8*             beaconPtr;
     tANI_U32             assocReqLength;
-    tANI_U8*             assocReqPtr;    
+    tANI_U8*             assocReqPtr;
+    uint32_t             rate_flags;
+    tSirSmeChanInfo      chan_info;
+    tSirMacHTChannelWidth ch_width;
+    tDot11fIEHTCaps HTCaps;
+    tDot11fIEVHTCaps VHTCaps;
 } tLimMlmAssocInd, *tpLimMlmAssocInd;
 
 typedef struct sLimMlmReassocReq
@@ -296,6 +311,9 @@ typedef struct sLimMlmReassocInd
     tSirSupChnl             supportedChannels;
 
     tAniBool               WmmStaInfoPresent;
+#ifdef WLAN_FEATURE_AP_HT40_24G
+    tAniBool               HT40MHzIntoPresent;
+#endif
 
     // Required for indicating the frames to upper layer
     tANI_U32             beaconLength;
@@ -670,7 +688,8 @@ void limProcessActionFrameNoSession(tpAniSirGlobal pMac, tANI_U8 *pRxMetaInfo);
 tSirRetStatus limPopulateMacHeader(tpAniSirGlobal, tANI_U8*, tANI_U8, tANI_U8, tSirMacAddr,tSirMacAddr);
 tSirRetStatus limSendProbeReqMgmtFrame(tpAniSirGlobal, tSirMacSSid *, tSirMacAddr, tANI_U8, tSirMacAddr, tANI_U32, tANI_U32, tANI_U8 *); 
 void limSendProbeRspMgmtFrame(tpAniSirGlobal, tSirMacAddr, tpAniSSID, short, tANI_U8, tpPESession, tANI_U8);
-void limSendAuthMgmtFrame(tpAniSirGlobal, tSirMacAuthFrameBody *, tSirMacAddr, tANI_U8,tpPESession);
+void limSendAuthMgmtFrame(tpAniSirGlobal, tSirMacAuthFrameBody *, tSirMacAddr,
+                                             tANI_U8, tpPESession , tAniBool);
 void limSendAssocReqMgmtFrame(tpAniSirGlobal, tLimMlmAssocReq *,tpPESession);
 void limSendReassocReqMgmtFrame(tpAniSirGlobal, tLimMlmReassocReq *,tpPESession);
 #ifdef WLAN_FEATURE_VOWIFI_11R
@@ -685,16 +704,38 @@ void limSendAddtsReqActionFrame(tpAniSirGlobal pMac, tSirMacAddr peerMacAddr,
 void limSendAddtsRspActionFrame(tpAniSirGlobal pMac, tSirMacAddr peerMacAddr,
                            tANI_U16 statusCode, tSirAddtsReqInfo *addts, tSirMacScheduleIE *pSchedule,tpPESession);
 
-void limSendAssocRspMgmtFrame(tpAniSirGlobal, tANI_U16, tANI_U16, tSirMacAddr, tANI_U8, tpDphHashNode pSta,tpPESession);
+void limSendAssocRspMgmtFrame(tpAniSirGlobal, tANI_U16, tANI_U16, tSirMacAddr,
+                              tANI_U8, tpDphHashNode pSta,tpPESession,
+                              assoc_rsp_tx_context *tx_complete_context);
 
 void limSendNullDataFrame(tpAniSirGlobal, tpDphHashNode);
 void limSendDisassocMgmtFrame(tpAniSirGlobal, tANI_U16, tSirMacAddr, tpPESession, tANI_BOOLEAN waitForAck);
 void limSendDeauthMgmtFrame(tpAniSirGlobal, tANI_U16, tSirMacAddr, tpPESession, tANI_BOOLEAN waitForAck);
-
+void limDoSendAuthMgmtFrame(tpAniSirGlobal, tpPESession);
 void limContinueChannelScan(tpAniSirGlobal);
 tSirResultCodes limMlmAddBss(tpAniSirGlobal, tLimMlmStartReq *,tpPESession psessionEntry);
 
 tSirRetStatus limSendChannelSwitchMgmtFrame(tpAniSirGlobal, tSirMacAddr, tANI_U8, tANI_U8, tANI_U8, tpPESession);
+
+/**
+ * lim_send_extended_chan_switch_action_frame()- function to send ECSA
+ * action frame over the air .
+ * @mac_ctx: pointer to global mac structure
+ * @peer: Destination mac.
+ * @mode: channel switch mode
+ * @new_op_class: new op class
+ * @new_channel: new channel to switch
+ * @count: channel switch count
+ *
+ * This function is called to send ECSA frame.
+ *
+ * Return: success if frame is sent else return failure
+ */
+tSirRetStatus
+lim_send_extended_chan_switch_action_frame(tpAniSirGlobal mac_ctx,
+   tSirMacAddr peer, uint8_t mode, uint8_t new_op_class,
+   uint8_t new_channel, uint8_t count, tpPESession session_entry);
+
 
 #ifdef WLAN_FEATURE_11AC
 tSirRetStatus limSendVHTOpmodeNotificationFrame(tpAniSirGlobal pMac,tSirMacAddr peer,tANI_U8 nMode, tpPESession  psessionEntry );
@@ -711,18 +752,6 @@ tSirRetStatus limSendRadioMeasureReportActionFrame(tpAniSirGlobal, tANI_U8, tANI
 void limProcessIappFrame(tpAniSirGlobal, tANI_U8 *,tpPESession);
 #endif
 
-#ifdef FEATURE_WLAN_TDLS_INTERNAL
-tSirRetStatus limSendTdlsDisReqFrame(tpAniSirGlobal pMac, 
-           tSirMacAddr peer_mac, tANI_U8 dialog, tpPESession psessionEntry);
-tSirRetStatus limSendTdlsLinkSetupReqFrame(tpAniSirGlobal pMac,
-           tSirMacAddr peerMac, tANI_U8 dialog, tpPESession psessionEntry,
-           tANI_U8* addIe, tANI_U16 len); 
-
-eHalStatus limTdlsPrepareSetupReqFrame(tpAniSirGlobal pMac,
-                              tLimTdlsLinkSetupInfo *linkSetupInfo,
-                                 tANI_U8 dialog, tSirMacAddr peerMac,
-                                                 tpPESession psessionEntry);
-#endif
 #ifdef FEATURE_WLAN_TDLS
 void limInitTdlsData(tpAniSirGlobal, tpPESession);
 tSirRetStatus limProcessSmeTdlsMgmtSendReq(tpAniSirGlobal pMac, 
@@ -735,7 +764,7 @@ tSirRetStatus limProcessSmeTdlsDelStaReq(tpAniSirGlobal pMac,
                                                            tANI_U32 *pMsgBuf);
 void limSendSmeTDLSDeleteAllPeerInd(tpAniSirGlobal pMac, tpPESession psessionEntry);
 void limSendSmeMgmtTXCompletion(tpAniSirGlobal pMac,
-                                tpPESession psessionEntry,
+                                tANI_U32 smeSessionId,
                                 tANI_U32 txCompleteStatus);
 tSirRetStatus limDeleteTDLSPeers(tpAniSirGlobal pMac, tpPESession psessionEntry);
 eHalStatus limProcessTdlsAddStaRsp(tpAniSirGlobal pMac, void *msg, tpPESession);
@@ -828,6 +857,7 @@ void limProcessSwitchChannelRsp(tpAniSirGlobal pMac,  void * );
 void limSendHalInitScanReq( tpAniSirGlobal, tLimLimHalScanState, tSirLinkTrafficCheck);
 void limSendHalStartScanReq( tpAniSirGlobal, tANI_U8, tLimLimHalScanState);
 void limSendHalEndScanReq( tpAniSirGlobal, tANI_U8, tLimLimHalScanState);
+void limSendTLPauseInd(tpAniSirGlobal pMac, uint16_t staId);
 void limSendHalFinishScanReq( tpAniSirGlobal, tLimLimHalScanState);
 
 void limContinuePostChannelScan(tpAniSirGlobal pMac);
@@ -872,6 +902,15 @@ tSirRetStatus limSendSaQueryRequestFrame( tpAniSirGlobal pMac, tANI_U8 *transId,
 tSirRetStatus limSendSaQueryResponseFrame( tpAniSirGlobal pMac, 
                    tANI_U8 *transId, tSirMacAddr peer,tpPESession psessionEntry);
 #endif
+
+#ifdef WLAN_FEATURE_RMC
+void limProcessRMCMessages(tpAniSirGlobal pMac, eRmcMessageType msgType,
+                             tANI_U32 *pMsgBuf);
+tSirRetStatus limSendRMCActionFrame(tpAniSirGlobal  pMac,
+                 tSirMacAddr peerMacAddr, tSirRMCInfo  *pRMC,
+                 tpPESession psessionEntry);
+#endif /* WLAN_FEATURE_RMC */
+
 // Inline functions
 
 /**
@@ -912,7 +951,10 @@ limPostSmeMessage(tpAniSirGlobal pMac, tANI_U32 msgType, tANI_U32 *pMsgBuf)
     msg.bodyptr = pMsgBuf;
     msg.bodyval = 0;
     if (msgType > eWNI_SME_MSG_TYPES_BEGIN)
+    {
+        MTRACE(macTrace(pMac, TRACE_CODE_TX_SME_MSG, NO_SESSION, msg.type));
         limProcessSmeReqMessages(pMac, &msg);
+    }
     else
         limProcessMlmRspMessages(pMac, msgType, pMsgBuf);
 } /*** end limPostSmeMessage() ***/
@@ -955,6 +997,7 @@ limPostMlmMessage(tpAniSirGlobal pMac, tANI_U32 msgType, tANI_U32 *pMsgBuf)
     msg.type = (tANI_U16) msgType;
     msg.bodyptr = pMsgBuf;
     msg.bodyval = 0;
+    MTRACE(macTraceMsgRx(pMac, NO_SESSION, msg.type));
     limProcessMlmReqMessages(pMac, &msg);
 } /*** end limPostMlmMessage() ***/
 
@@ -987,40 +1030,6 @@ limGetCurrentScanChannel(tpAniSirGlobal pMac)
 
     return (*(pChanNum + pMac->lim.gLimCurrentScanChannelId));
 } /*** end limGetCurrentScanChannel() ***/
-
-
-
-/**
- * limGetIElenFromBssDescription()
- *
- *FUNCTION:
- * This function is called in various places to get IE length
- * from tSirBssDescription structure
- * number being scanned.
- *
- *PARAMS:
- *
- *LOGIC:
- *
- *ASSUMPTIONS:
- * NA
- *
- *NOTE:
- * NA
- *
- * @param     pBssDescr
- * @return    Total IE length
- */
-
-static inline tANI_U16
-limGetIElenFromBssDescription(tpSirBssDescription pBssDescr)
-{
-    if (!pBssDescr)
-        return 0;
-
-    return ((tANI_U16) (pBssDescr->length + sizeof(tANI_U16) +
-                   sizeof(tANI_U32) - sizeof(tSirBssDescription)));
-} /*** end limGetIElenFromBssDescription() ***/
 
 /**
  * limSendBeaconInd()
@@ -1071,27 +1080,28 @@ void limSendP2PActionFrame(tpAniSirGlobal pMac, tpSirMsgQ pMsg);
 void limAbortRemainOnChan(tpAniSirGlobal pMac);
 tSirRetStatus __limProcessSmeNoAUpdate(tpAniSirGlobal pMac, tANI_U32 *pMsgBuf);
 void limProcessRegdDefdSmeReqAfterNOAStart(tpAniSirGlobal pMac);
-#ifdef FEATURE_WLAN_TDLS_INTERNAL
-void limProcessTdlsFrame(tpAniSirGlobal, tANI_U32 *);
-void limProcessTdlsPublicActionFrame(tpAniSirGlobal pMac, tANI_U32 *pBd, 
-                                                               tpPESession) ;
-#ifdef FEATURE_WLAN_TDLS_NEGATIVE
-#define LIM_TDLS_NEGATIVE_WRONG_BSSID_IN_DSCV_REQ   0x1 /* 5.1.4-5 */
-#define LIM_TDLS_NEGATIVE_WRONG_BSSID_IN_SETUP_REQ  0x2 /* 5.2.4-16 */
-#define LIM_TDLS_NEGATIVE_STATUS_37_IN_SETUP_CNF    0x4 /* 5.2.4-10 */
-#define LIM_TDLS_NEGATIVE_SEND_REQ_TO_SETUP_REQ     0x8 /* 5.2.4-20/32 */
-#define LIM_TDLS_NEGATIVE_RSP_TIMEOUT_TO_SETUP_REQ  0x10 /* 5.2.3.4 */
-#define LIM_TDLS_NEGATIVE_TREAT_TDLS_PROHIBIT_AP    0x20 /* 5.2.4-49 */
-   /* following is not paticularily tested in WFA test plan, but will help to validate our TDLS behavior in-house */
-#define LIM_TDLS_NEGATIVE_WRONG_BSSID_IN_DSCV_RSP   0x40
-#define LIM_TDLS_NEGATIVE_WRONG_BSSID_IN_SETUP_RSP  0x80
-
-void limTdlsSetNegativeBehavior(tpAniSirGlobal pMac, tANI_U8 value, tANI_BOOLEAN on);
-#endif
-#endif
-
 void limProcessDisassocAckTimeout(tpAniSirGlobal pMac);
 void limProcessDeauthAckTimeout(tpAniSirGlobal pMac);
+/**
+ * lim_process_ap_ecsa_timeout() -process ECSA timeout which indicate ECSA IE TX
+ * complete in beacon
+ * @mac_ctx - A pointer to Global MAC structure
+ *
+ * Return None
+ */
+void lim_process_ap_ecsa_timeout(tpAniSirGlobal mac_ctx);
+/**
+ * lim_send_sme_ap_channel_switch_resp() -process channel switch resp for ecsa
+ * channel switch req
+ * @mac_ctx - A pointer to Global MAC structure
+ * @session: session on which channel switch was done
+ * @chan_param: channel switch resp params
+ *
+ * Return None
+ */
+void lim_send_sme_ap_channel_switch_resp(tpAniSirGlobal mac_ctx,
+           tpPESession session, tpSwitchChannelParams chan_param);
+
 eHalStatus limSendDisassocCnf(tpAniSirGlobal pMac);
 eHalStatus limSendDeauthCnf(tpAniSirGlobal pMac);
 
@@ -1106,5 +1116,32 @@ void limProcessRxScanEvent(tpAniSirGlobal mac, void *buf);
 
 int limProcessRemainOnChnlReq(tpAniSirGlobal pMac, tANI_U32 *pMsg);
 void limRemainOnChnRsp(tpAniSirGlobal pMac, eHalStatus status, tANI_U32 *data);
+void limProcessMlmSpoofMacAddrRsp(tpAniSirGlobal pMac, tSirRetStatus rspStatus);
+tSirRetStatus limProcessSmeSetTdls2040BSSCoexReq(tpAniSirGlobal pMac,
+                                                 tANI_U32 *pMsgBuf);
+tSirRetStatus limProcessSmeDelAllTdlsPeers(tpAniSirGlobal pMac,
+                                           tANI_U32 *pMsgBuf);
+
+tSirRetStatus lim_process_sme_cap_tsf_req(tpAniSirGlobal pMac,
+                                          tANI_U32 *pMsgBuf);
+
+tSirRetStatus lim_process_sme_get_tsf_req(tpAniSirGlobal pMac,
+                                          tANI_U32 *pMsgBuf);
+
+tSirRetStatus lim_process_sme_del_ba_ses_req(tpAniSirGlobal pMac,
+                                             tANI_U32 *pMsgBuf);
+/**
+ * lim_send_chan_switch_action_frame() - send channel switch action frame to all
+ * connected peers
+ * @mac_ctx: Pointer to Global MAC structure
+ * @new_channel: new channel
+ * @session_entry: ap session
+ *
+ * Return: None
+ */
+void lim_send_chan_switch_action_frame(tpAniSirGlobal mac_ctx,
+     uint16_t new_channel, tpPESession session_entry);
+
+
 #endif /* __LIM_TYPES_H */
 

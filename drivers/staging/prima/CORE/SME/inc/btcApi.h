@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2012-2013 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2013, 2016, 2018 The Linux Foundation. All rights
+ * reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -31,8 +32,6 @@
 *
 * Description: BTC Events Layer API definitions.
 *
-* Copyright 2008 (c) Qualcomm, Incorporated.  All Rights Reserved.
-* Qualcomm Confidential and Proprietary.
 *
 ******************************************************************************/
 
@@ -106,12 +105,6 @@
     respective stop event, before it can be declared timed out on receiving the stop event.
 */
 #define BT_MAX_EVENT_DONE_TIMEOUT   45000
-
-/*
-    Maximum time duration to enable uapsd after the event is received from
-    firmware. This is added to handle back to back events from BTC.
-*/
-#define BTC_MAX_ENABLE_UAPSD_TIMER         (1000*60)
 
 /*
     To suppurt multiple SCO connections for BT+UAPSD work
@@ -374,9 +367,13 @@ typedef struct sSmeBtcInfo
    v_BOOL_t      fA2DPTrafStop;/*flag to check A2DP_STOP event has come before MODE_CHANGED*/
    v_U16_t       btcScoHandles[BT_MAX_SCO_SUPPORT];  /* Handles for SCO, if any*/
    v_BOOL_t      fA2DPUp;        /*remember whether A2DP is in session*/
-   v_BOOL_t      btcScanCompromise;
+   /* Scan compromise due to eSCO */
+   bool          btc_scan_compromise_esco;
+   /* Scan compromise due to SCO */
+   bool          btc_scan_compromise_sco;
    v_U8_t        btcBssfordisableaggr[VOS_MAC_ADDRESS_LEN];
    vos_timer_t   enableUapsdTimer;
+   bool          agg_disabled;
 } tSmeBtcInfo, *tpSmeBtcInfo;
 
 

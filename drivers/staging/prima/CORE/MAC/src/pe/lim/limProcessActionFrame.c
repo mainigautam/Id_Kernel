@@ -1278,7 +1278,8 @@ __limProcessAddBAReq( tpAniSirGlobal pMac, tANI_U8 *pRxPacketInfo,tpPESession ps
 
     psessionEntry->amsduSupportedInBA = frmAddBAReq.AddBAParameterSet.amsduSupported;
 
-    pSta = dphLookupHashEntry( pMac, pHdr->sa, &aid, &psessionEntry->dph.dphHashTable );
+    pSta = dphLookupHashEntry(pMac, pHdr->sa, &aid,
+                              &psessionEntry->dph.dphHashTable);
     if( pSta == NULL )
     {
         limLog( pMac, LOGE,
