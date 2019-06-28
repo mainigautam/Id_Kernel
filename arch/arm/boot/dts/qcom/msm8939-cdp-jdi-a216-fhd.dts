@@ -14,7 +14,6 @@
 
 #include "msm8939.dtsi"
 #include "msm8939-cdp.dtsi"
-#include "msm8939-regulator.dtsi"
 
 / {
 	model = "Qualcomm Technologies, Inc. MSM 8939 CDP JDI 5.5-inch A216 FHD";
@@ -39,7 +38,7 @@
 &ts_reset_suspend {
 	output-low;
 };
-/*
+
 &spi_5 {
 	status = "okay";
 	bu21150-ts-spi@0 {
@@ -65,7 +64,7 @@
 		jdi,timeout-enable;
 	};
 };
-*/
+
 &pmx_mdss {
 	qcom,num-grp-pins = <1>;
 	qcom,pins = <&gp 98>;

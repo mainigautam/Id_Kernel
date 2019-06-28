@@ -13,7 +13,7 @@
 /* External I2C controlled buck regulators */
 
 &i2c_4 {
-/*xiesu del no used	ncp6335d: ncp6335d-regulator@1c {
+	ncp6335d: ncp6335d-regulator@1c {
 		compatible = "onnn,ncp6335d-regulator";
 		reg = <0x1c>;
 		onnn,vsel = <0>;
@@ -29,7 +29,7 @@
 		onnn,vsel-gpio = <&msm_gpio 111 1>;
 		onnn,discharge-enable;
 		onnn,restore-reg;
-	};  xiesu del end*/
+	};
 
 	fan53555: fan53555-regulator@60 {
 		compatible = "fairchild,fan53555-regulator";
@@ -85,9 +85,8 @@
 
 		qcom,cpr-fuse-corners = <3>;
 		qcom,cpr-voltage-ceiling = <1050000 1150000 1350000>;
-		/*qcom,cpr-voltage-floor = <1050000 1050000 1137500>;  del by lidan*/
-		qcom,cpr-voltage-floor = <1050000 1100000 1200000>; 
-		vdd-apc-supply = <&fan53555>;/*yuanshi=<&ncp6335d>;*/
+		qcom,cpr-voltage-floor = <1050000 1050000 1137500>;
+		vdd-apc-supply = <&ncp6335d>;
 
 		qcom,vdd-mx-corner-map = <4 5 7>;
 		qcom,vdd-mx-vmin-method = <4>;
@@ -183,6 +182,10 @@
 			<2          2          1 0xffffffff 0xffffffff 0xffffffff>,
 			<2          2          2 0xffffffff 0xffffffff 0xffffffff>,
 			<2          2          3 0xffffffff 0xffffffff 0xffffffff>,
+			<5          6          0 0xffffffff 0xffffffff 0xffffffff>,
+			<5          6          1 0xffffffff 0xffffffff 0xffffffff>,
+			<5          6          2 0xffffffff 0xffffffff 0xffffffff>,
+			<5          6          3 0xffffffff 0xffffffff 0xffffffff>,
 			<0xffffffff 0xffffffff 0 0xffffffff 0xffffffff 0xffffffff>,
 			<0xffffffff 0xffffffff 1 0xffffffff 0xffffffff 0xffffffff>,
 			<0xffffffff 0xffffffff 2 0xffffffff 0xffffffff 0xffffffff>,
@@ -192,8 +195,12 @@
 					<0   20000  0>,
 					<0   50000  0>,
 					<0   20000  0>,
+					<0   50000  0>,
 					<0   20000  0>,
-					<0 (-10000) 0>,
+					<0   50000  0>,
+					<0   20000  0>,
+					<0   50000  0>,
+					<0   20000  0>,
 					<0   50000  0>,
 					<0   20000  0>,
 					<0   50000  0>,
@@ -217,6 +224,10 @@
 					<0 (-20) (-124)>, /* NOM - 10mv, TURBO - 60mv	*/
 					<0  104  (-124)>, /* NOM + 50mv, TURBO - 60mv	*/
 					<0   41  (-124)>, /* NOM + 20mv, TURBO - 60mv	*/
+					<0   41   (-41)>, /* NOM + 20mv, TURBO - 20mv	*/
+					<0 (-20)  (-41)>, /* NOM - 10mv, TURBO - 20mv	*/
+					<0  104   (-41)>, /* NOM + 50mv, TURBO - 20mv	*/
+					<0   41   (-41)>, /* NOM + 20mv, TURBO - 20mv	*/
 					<0  104   (-41)>, /* NOM + 50mv, TURBO - 20mv	*/
 					<0   41   (-41)>, /* NOM + 20mv, TURBO - 20mv	*/
 					<0  104   (-41)>, /* NOM + 50mv, TURBO - 20mv	*/
@@ -235,6 +246,10 @@
 					<0 0 62>,
 					<0 0 62>,
 					<0 0 62>,
+					<0 0 40>,
+					<0 0 40>,
+					<0 0 40>,
+					<0 0 40>,
 					<0 0 40>,
 					<0 0 40>,
 					<0 0 40>,
@@ -271,6 +286,14 @@
 			<0 0 0 (-104) (-104) (-104) (-104) (-104) (-104) (-104)
 			 (-104) (-104) (-41) 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>,
 			<0 0 0 (-104) (-104) (-104) (-104) (-104) (-104) (-104)
+			 (-104) (-41) (-41) 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>,
+			<0 0 0 (-104) (-104) (-104) (-104) (-104) (-104) (-104)
+			 (-104) (-104) (-41) 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>,
+			<0 0 0 (-104) (-104) (-104) (-104) (-104) (-104) (-104)
+			 (-104) (-41) (-41) 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>,
+			<0 0 0 (-104) (-104) (-104) (-104) (-104) (-104) (-104)
+			 (-104) (-104) (-41) 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>,
+			<0 0 0 (-104) (-104) (-104) (-104) (-104) (-104) (-104)
 			 (-104) (-41) (-41) 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>;
 		qcom,cpr-virtual-corner-init-voltage-adjustment =
 			<0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 35000 0 0 0 0>,
@@ -288,6 +311,10 @@
 			<0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0     0 0 0 0 0>,
 			<0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0     0 0 0 0 0>,
 			<0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0     0 0 0 0 0>,
+			<0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0     0 0 0 0 0>,
+			<0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0     0 0 0 0 0>,
+			<0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0     0 0 0 0 0>,
+			<0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0     0 0 0 0 0>,
 			<0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0     0 0 0 0 0>;
 		qcom,cpr-voltage-floor-override =
 			<0xffffffff 0xffffffff 1050000 1050000 1050000 1050000
@@ -295,7 +322,7 @@
 			1050000 1050000 1100000 1137500 1137500 1137500 1137500
 			1137500 1137500 1137500 1137500 1137500 1137500 1137500
 			1137500 1137500 1137500>;
-	/*	qcom,cpr-enable;  del by lidan */
+		qcom,cpr-enable;
 	};
 };
 

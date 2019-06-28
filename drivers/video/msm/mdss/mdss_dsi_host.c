@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,7 +21,6 @@
 #include <linux/iopoll.h>
 #include <linux/kthread.h>
 
-
 #include <linux/msm_iommu_domains.h>
 
 #include "mdss.h"
@@ -29,10 +28,9 @@
 #include "mdss_panel.h"
 #include "mdss_debug.h"
 
-
-
-
 #define VSYNC_PERIOD 17
+#define DMA_TX_TIMEOUT 200
+#define DMA_TPG_FIFO_LEN 64
 
 struct mdss_dsi_ctrl_pdata *ctrl_list[DSI_CTRL_MAX];
 
@@ -76,62 +74,6 @@ static struct mdss_dsi_event dsi_event;
 
 static int dsi_event_thread(void *data);
 
-//chenjian
-struct wr_cmd_payload {
-        u16 addr;
-        u32 data;
-} __packed;
-//static struct dsi_buf dsi_panel_tx_buf;
-//static struct dsi_buf dsi_panel_rx_buf;
-#define DSI_BUF_SIZE    1024
-
-int mipi_d2l_write_reg(struct mdss_dsi_ctrl_pdata *ctrl, u16 reg, u32 data)
-{
-        struct wr_cmd_payload payload;
-        struct dcs_cmd_req cmdreq;
-        struct dsi_cmd_desc cmd_write_reg = {
-        {DTYPE_MAX_PKTSIZE, 1, 0, 1, 5, sizeof(payload)}, (char *)&payload};
-        payload.addr = reg;
-        payload.data = data;
-        memset(&cmdreq, 0, sizeof(cmdreq));
-        cmdreq.cmds = &cmd_write_reg;
-        cmdreq.cmds_cnt = 1;
-        cmdreq.flags =  CMD_REQ_COMMIT|CMD_REQ_LP_MODE;
-        cmdreq.rlen = 0;
-        cmdreq.cb = NULL;
-        mdss_dsi_cmdlist_put(ctrl, &cmdreq);
-
-        return 0;
-}
-
-u32 mipi_d2l_read_reg(struct mdss_dsi_ctrl_pdata *ctrl, u16 reg)
-{
-        u32 data;
-	static struct dsi_buf *dsi_panel_rx_buf;
-	
-        struct dcs_cmd_req cmdreq;
-        struct dsi_cmd_desc cmd_read_reg = {
-        {DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(reg)}, (char *) &reg};
-
-        //{DTYPE_GEN_READ2, 1, 0, 1, 5, sizeof(reg)}, (char *) &reg};
-
-		dsi_panel_rx_buf = &ctrl->rx_buf;//add for err
-
-        mdss_dsi_buf_init(dsi_panel_rx_buf);
-        memset(&cmdreq, 0, sizeof(cmdreq));
-        cmdreq.cmds = &cmd_read_reg;
-        cmdreq.cmds_cnt = 1;
-        cmdreq.flags = CMD_REQ_RX | CMD_REQ_COMMIT|CMD_REQ_HS_MODE;//XIESU========YUANSHI=CMD_REQ_LP_MODE
-        cmdreq.rbuf = dsi_panel_rx_buf->data;
-        cmdreq.rlen = 4;
-        cmdreq.cb = NULL;
-        mdss_dsi_cmdlist_put(ctrl, &cmdreq);
-        data = *(u32 *)dsi_panel_rx_buf->data;
-        return data;
-
-}
-//end
-
 void mdss_dsi_ctrl_init(struct device *ctrl_dev,
 			struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -155,7 +97,7 @@ void mdss_dsi_ctrl_init(struct device *ctrl_dev,
 	if (ctrl->mdss_util->register_irq(ctrl->dsi_hw))
 		pr_err("%s: mdss_register_irq failed.\n", __func__);
 
-	pr_debug("%s: ndx=%d base=%p\n", __func__, ctrl->ndx, ctrl->ctrl_base);
+	pr_debug("%s: ndx=%d base=%pK\n", __func__, ctrl->ndx, ctrl->ctrl_base);
 
 	init_completion(&ctrl->dma_comp);
 	init_completion(&ctrl->mdp_comp);
@@ -322,9 +264,12 @@ void mdss_dsi_cmd_test_pattern(struct mdss_dsi_ctrl_pdata *ctrl)
 
 void mdss_dsi_get_hw_revision(struct mdss_dsi_ctrl_pdata *ctrl)
 {
-	mdss_dsi_clk_ctrl(ctrl, DSI_ALL_CLKS, 1);
+	if (ctrl->hw_rev)
+		return;
+
+	mdss_dsi_clk_ctrl(ctrl, DSI_BUS_CLKS, 1);
 	ctrl->hw_rev = MIPI_INP(ctrl->ctrl_base);
-	mdss_dsi_clk_ctrl(ctrl, DSI_ALL_CLKS, 0);
+	mdss_dsi_clk_ctrl(ctrl, DSI_BUS_CLKS, 0);
 
 	pr_debug("%s: ndx=%d hw_rev=%x\n", __func__,
 				ctrl->ndx, ctrl->hw_rev);
@@ -544,7 +489,7 @@ static inline bool mdss_dsi_poll_clk_lane(struct mdss_dsi_ctrl_pdata *ctrl)
 	if (readl_poll_timeout(((ctrl->ctrl_base) + 0x00a8),
 				clk,
 				(clk & 0x0010),
-				10, 1000)) {
+				100, 20000)) {
 		pr_err("%s: ndx=%d clk lane NOT stopped, clk=%x\n",
 					__func__, ctrl->ndx, clk);
 
@@ -565,7 +510,8 @@ static void mdss_dsi_wait_clk_lane_to_stop(struct mdss_dsi_ctrl_pdata *ctrl)
 
 	if (mdss_dsi_poll_clk_lane(ctrl) == false)
 		pr_err("%s: clk lane recovery failed\n", __func__);
-
+	else
+		ctrl->clk_lane_cnt = 0;
 	/* clear clk lane tx stop -- bit 20 */
 	mdss_dsi_cfg_lane_ctrl(ctrl, BIT(20), 0);
 }
@@ -579,11 +525,12 @@ static void mdss_dsi_stop_hs_clk_lane(struct mdss_dsi_ctrl_pdata *ctrl);
  */
 static void mdss_dsi_start_hs_clk_lane(struct mdss_dsi_ctrl_pdata *ctrl)
 {
-
 	/* make sure clk lane is stopped */
 	mdss_dsi_stop_hs_clk_lane(ctrl);
 
 	mutex_lock(&ctrl->clk_lane_mutex);
+	MDSS_XLOG(ctrl->ndx, ctrl->clk_lane_cnt, current->pid,
+			XLOG_FUNC_ENTRY);
 	mdss_dsi_clk_ctrl(ctrl, DSI_ALL_CLKS, 1);
 	if (ctrl->clk_lane_cnt) {
 		pr_err("%s: ndx=%d do-wait, cnt=%d\n",
@@ -597,6 +544,8 @@ static void mdss_dsi_start_hs_clk_lane(struct mdss_dsi_ctrl_pdata *ctrl)
 	pr_debug("%s: ndx=%d, set_hs, cnt=%d\n", __func__,
 				ctrl->ndx, ctrl->clk_lane_cnt);
 	mdss_dsi_clk_ctrl(ctrl, DSI_ALL_CLKS, 0);
+	MDSS_XLOG(ctrl->ndx, ctrl->clk_lane_cnt,
+			current->pid, XLOG_FUNC_EXIT);
 	mutex_unlock(&ctrl->clk_lane_mutex);
 }
 
@@ -604,6 +553,10 @@ static void mdss_dsi_start_hs_clk_lane(struct mdss_dsi_ctrl_pdata *ctrl)
  * mdss_dsi_stop_hs_clk_lane:
  * this function is work around solution for 8994 dsi clk lane
  * may stuck at HS problem
+ * since this function is called by event_thread, it may wakeup
+ * after next kickoff had been lunched and start_hs_clk_lane
+ * had been started. Therefore more than 1 vsync polling time is needed.
+ * Use 50ms timeout to cover 30 FPS case.
  */
 static void mdss_dsi_stop_hs_clk_lane(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -611,6 +564,8 @@ static void mdss_dsi_stop_hs_clk_lane(struct mdss_dsi_ctrl_pdata *ctrl)
 	u32 lane = 0;
 
 	mutex_lock(&ctrl->clk_lane_mutex);
+	MDSS_XLOG(ctrl->ndx, ctrl->clk_lane_cnt, current->pid,
+			XLOG_FUNC_ENTRY);
 	if (ctrl->clk_lane_cnt == 0)	/* stopped already */
 		goto release;
 
@@ -619,7 +574,7 @@ static void mdss_dsi_stop_hs_clk_lane(struct mdss_dsi_ctrl_pdata *ctrl)
 	if (readl_poll_timeout(((ctrl->ctrl_base) + 0x000c),
 			   fifo,
 			   ((fifo & 0x11110000) == 0x11110000),
-			       10, 1000)) {
+			       100, 50000)) {
 		pr_err("%s: fifo NOT empty, fifo=%x\n",
 					__func__, fifo);
 		goto end;
@@ -629,7 +584,7 @@ static void mdss_dsi_stop_hs_clk_lane(struct mdss_dsi_ctrl_pdata *ctrl)
 	if (readl_poll_timeout(((ctrl->ctrl_base) + 0x00a8),
 			   lane,
 			   ((lane & 0x000f) == 0x000f),
-			       100, 2000)) {
+			       100, 20000)) {
 		pr_err("%s: datalane NOT stopped, lane=%x\n",
 					__func__, lane);
 	}
@@ -645,6 +600,8 @@ release:
 	pr_debug("%s: ndx=%d, cnt=%d\n", __func__,
 			ctrl->ndx, ctrl->clk_lane_cnt);
 
+	MDSS_XLOG(ctrl->ndx, ctrl->clk_lane_cnt,
+			current->pid, XLOG_FUNC_EXIT);
 	mutex_unlock(&ctrl->clk_lane_mutex);
 }
 
@@ -1069,7 +1026,7 @@ int mdss_dsi_reg_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	return ret;
 }
 
-static void mdss_dsi_mode_setup(struct mdss_panel_data *pdata)//xiesu====
+static void mdss_dsi_mode_setup(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo;
@@ -1187,9 +1144,7 @@ void mdss_dsi_ctrl_setup(struct mdss_dsi_ctrl_pdata *ctrl)
 int mdss_dsi_bta_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int ret = 0;
-	//unsigned long flag;
-	u32 panel_status,panel_status1,panel_status2,panel_status3;
-	struct mdss_panel_info *pinfo;///
+	unsigned long flag;
 
 	if (ctrl_pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -1202,75 +1157,8 @@ int mdss_dsi_bta_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		return 0;
 	}
 
-	//pr_err("%s:JacKChen Checking BTA status\n", __func__);
+	pr_debug("%s: Checking BTA status\n", __func__);
 
-#if 1 //xiesu add combo
-		pinfo = &ctrl_pdata->panel_data.panel_info;//xiesu add
-		
-		///printk(KERN_ERR "JackChen-LCD:MSM8939 LCD xiesu status ret = %s\n",&pinfo->panel_name[0]);
-		
-		if (!strcmp(&pinfo->panel_name[0]/*data*/, "hx8399a 1080p video mode dsi panel")) {
-					//printk(KERN_ERR "JackChen-LCD:MSM8939 LCD xiesu status ret = %s\n",&pinfo->panel_name[0]);
-					mdss_dsi_set_tx_power_mode(0, &ctrl_pdata->panel_data);
-			        panel_status = mipi_d2l_read_reg(ctrl_pdata, 0x09);//0x09
-					mdss_dsi_set_tx_power_mode(1, &ctrl_pdata->panel_data);
-			        panel_status = ntohl(panel_status);
-			        panel_status=(panel_status>>8)&0x00FFFF;
-					//printk(KERN_ERR "JackChen-LCD:MSM8939 LCD status is 0x%x\n",panel_status);
-					if(panel_status != 0x7304)
-			        {      	
-			            ret = -1;			
-						printk(KERN_ERR "JackChen-LCD:MSM8939 LCD hx8399a status ret = %d\n",ret);
-			        }
-		} else if (!strcmp(&pinfo->panel_name[0]/*data*/, "otm1901a 1080p video mode dsi panel")) {
-					//printk(KERN_ERR "JackChen-LCD:MSM8939 LCD xiesu status ret = %s\n",&pinfo->panel_name[0]);
-					mdss_dsi_set_tx_power_mode(0, &ctrl_pdata->panel_data);
-			        panel_status = mipi_d2l_read_reg(ctrl_pdata, 0x0a);//0x09
-					mdss_dsi_set_tx_power_mode(1, &ctrl_pdata->panel_data);
-			        panel_status = ntohl(panel_status);
-			        panel_status=(panel_status>>24)&0x0000FF;
-			        //printk(KERN_ERR "JackChen-LCD:MSM8939 LCD status is 0x%x\n",panel_status);
-			//--------------------------------------------------------------------------------------
-					mdss_dsi_set_tx_power_mode(0, &ctrl_pdata->panel_data);
-					panel_status1 = mipi_d2l_read_reg(ctrl_pdata, 0x0d);//0x0d
-					mdss_dsi_set_tx_power_mode(1, &ctrl_pdata->panel_data);
-					panel_status1 = ntohl(panel_status1);
-					panel_status1=(panel_status1>>24)&0x0000FF;
-					//printk(KERN_ERR "JackChen-LCD:MSM8939 LCD status1 is 0x%x\n",panel_status1);
-						
-			//--------------------------------------------------------------------------------------
-					mdss_dsi_set_tx_power_mode(0, &ctrl_pdata->panel_data);
-					panel_status2 = mipi_d2l_read_reg(ctrl_pdata, 0x0b);//0x0b
-					mdss_dsi_set_tx_power_mode(1, &ctrl_pdata->panel_data);
-					panel_status2 = ntohl(panel_status2);
-					panel_status2=(panel_status2>>24)&0x0000FF;
-					//printk(KERN_ERR "JackChen-LCD:MSM8939 LCD status2 is 0x%x\n",panel_status2);
-			//-------------------------------------------------------------------------------------------
-					mdss_dsi_set_tx_power_mode(0, &ctrl_pdata->panel_data);
-					panel_status3 = mipi_d2l_read_reg(ctrl_pdata, 0x0c);//0x0c
-					mdss_dsi_set_tx_power_mode(1, &ctrl_pdata->panel_data);
-					panel_status3 = ntohl(panel_status3);
-					panel_status3=(panel_status3>>24)&0x0000FF;
-					//printk(KERN_ERR "JackChen-LCD:MSM8939 LCD status3 is 0x%x\n",panel_status3);
-			//-------------------------------------------------------------------------------------------
-
-			        if((panel_status != 0x9c)||(panel_status1 != 0x00)||(panel_status2 != 0x00)||(panel_status3 != 0x07))///0x7304 //0x009c
-			        {      	
-			            ret = -1;			
-						printk(KERN_ERR "JackChen-LCD:MSM8939 LCD OTM1901A status ret = %d\n",ret);
-			        }
-			
-		} 
-			else{
-				pr_err("xiesu ESD read status fail\n");
-			    ret = 0;	
-				}
-		
-
-	
-#endif 
-
-#if 0
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 1);
 	spin_lock_irqsave(&ctrl_pdata->mdp_lock, flag);
 	INIT_COMPLETION(ctrl_pdata->bta_comp);
@@ -1287,7 +1175,6 @@ int mdss_dsi_bta_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	}
 
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
-#endif
 	pr_debug("%s: BTA done with ret: %d\n", __func__, ret);
 
 	return ret;
@@ -1329,8 +1216,107 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 static int mdss_dsi_cmd_dma_rx(struct mdss_dsi_ctrl_pdata *ctrl,
 			struct dsi_buf *rp, int rlen);
 
+static int mdss_dsi_cmd_dma_tpg_tx(struct mdss_dsi_ctrl_pdata *ctrl,
+					struct dsi_buf *tp)
+{
+	int len, i, ret = 0, data = 0;
+	u32 *bp;
+	struct mdss_dsi_ctrl_pdata *mctrl = NULL;
+
+	if (tp->len > DMA_TPG_FIFO_LEN) {
+		pr_debug("command length more than FIFO length\n");
+		return -EINVAL;
+	}
+
+	mdss_dsi_get_hw_revision(ctrl);
+
+	if (ctrl->hw_rev < MDSS_DSI_HW_REV_103) {
+		pr_err("CMD DMA TPG not supported for this DSI version\n");
+		return -EINVAL;
+	}
+
+	bp = (u32 *)tp->data;
+	len = ALIGN(tp->len, 4);
+
+	INIT_COMPLETION(ctrl->dma_comp);
+
+	if (mdss_dsi_sync_wait_trigger(ctrl))
+		mctrl = mdss_dsi_get_other_ctrl(ctrl);
+
+	data = BIT(16) | BIT(17);	/* select CMD_DMA_PATTERN_SEL to 3 */
+	data |= BIT(2);			/* select CMD_DMA_FIFO_MODE to 1 */
+	data |= BIT(1);			/* enable CMD_DMA_TPG */
+
+	MIPI_OUTP(ctrl->ctrl_base + 0x15c, data);
+	if (mctrl)
+		MIPI_OUTP(mctrl->ctrl_base + 0x15c, data);
+
+	/*
+	 * The DMA command parameters need to be programmed to the DMA_INIT_VAL
+	 * register in the proper order. The 'len' value will be a multiple
+	 * of 4, the padding bytes to make sure of this will be taken care of in
+	 * mdss_dsi_cmd_dma_add API.
+	 */
+	for (i = 0; i < len; i += 4) {
+		MIPI_OUTP(ctrl->ctrl_base + 0x17c, *bp);
+		if (mctrl)
+			MIPI_OUTP(mctrl->ctrl_base + 0x17c, *bp);
+		wmb(); /* make sure write happens before writing next command */
+		bp++;
+	}
+
+	/*
+	 * The number of writes to the DMA_INIT_VAL register should be an even
+	 * number of dwords (32 bits). In case 'len' is not a multiple of 8,
+	 * we need to do make an extra write to the register with 0x00 to
+	 * satisfy this condition.
+	 */
+	if ((len % 8) != 0) {
+		MIPI_OUTP(ctrl->ctrl_base + 0x17c, 0x00);
+		if (mctrl)
+			MIPI_OUTP(mctrl->ctrl_base + 0x17c, 0x00);
+	}
+
+	if (mctrl) {
+		MIPI_OUTP(mctrl->ctrl_base + 0x04c, len);
+		MIPI_OUTP(mctrl->ctrl_base + 0x090, 0x01); /* trigger */
+	}
+	MIPI_OUTP(ctrl->ctrl_base + 0x04c, len);
+	wmb(); /* make sure DMA length is programmed */
+
+	MIPI_OUTP(ctrl->ctrl_base + 0x090, 0x01); /* trigger */
+	wmb(); /* make sure DMA trigger happens */
+
+	ret = wait_for_completion_timeout(&ctrl->dma_comp,
+				msecs_to_jiffies(DMA_TX_TIMEOUT));
+	if (ret == 0)
+		ret = -ETIMEDOUT;
+	else
+		ret = tp->len;
+
+	/* Reset the DMA TPG FIFO */
+	MIPI_OUTP(ctrl->ctrl_base + 0x1ec, 0x1);
+	wmb(); /* make sure FIFO reset happens */
+	MIPI_OUTP(ctrl->ctrl_base + 0x1ec, 0x0);
+	wmb(); /* make sure FIFO reset happens */
+	/* Disable CMD_DMA_TPG */
+	MIPI_OUTP(ctrl->ctrl_base + 0x15c, 0x0);
+
+	if (mctrl) {
+		/* Reset the DMA TPG FIFO */
+		MIPI_OUTP(mctrl->ctrl_base + 0x1ec, 0x1);
+		wmb(); /* make sure FIFO reset happens */
+		MIPI_OUTP(mctrl->ctrl_base + 0x1ec, 0x0);
+		wmb(); /* make sure FIFO reset happens */
+		/* Disable CMD_DMA_TPG */
+		MIPI_OUTP(mctrl->ctrl_base + 0x15c, 0x0);
+	}
+
+	return ret;
+}
+
 static int mdss_dsi_cmds2buf_tx(struct mdss_dsi_ctrl_pdata *ctrl,
-			struct dsi_cmd_desc *cmds, int cnt)
+			struct dsi_cmd_desc *cmds, int cnt, int use_dma_tpg)
 {
 	struct dsi_buf *tp;
 	struct dsi_cmd_desc *cm;
@@ -1357,7 +1343,10 @@ static int mdss_dsi_cmds2buf_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 			wait = mdss_dsi_wait4video_eng_busy(ctrl);
 
 			mdss_dsi_enable_irq(ctrl, DSI_CMD_TERM);
-			len = mdss_dsi_cmd_dma_tx(ctrl, tp);
+			if (use_dma_tpg)
+				len = mdss_dsi_cmd_dma_tpg_tx(ctrl, tp);
+			else
+				len = mdss_dsi_cmd_dma_tx(ctrl, tp);
 			if (IS_ERR_VALUE(len)) {
 				mdss_dsi_disable_irq(ctrl, DSI_CMD_TERM);
 				pr_err("%s: failed to call cmd_dma_tx for cmd = 0x%x\n",
@@ -1415,7 +1404,7 @@ static inline bool __mdss_dsi_cmd_mode_config(
  * thread context only
  */
 int mdss_dsi_cmds_tx(struct mdss_dsi_ctrl_pdata *ctrl,
-		struct dsi_cmd_desc *cmds, int cnt)
+		struct dsi_cmd_desc *cmds, int cnt, int use_dma_tpg)
 {
 	int len = 0;
 	struct mdss_dsi_ctrl_pdata *mctrl = NULL;
@@ -1450,7 +1439,7 @@ int mdss_dsi_cmds_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 do_send:
 	ctrl->cmd_cfg_restore = __mdss_dsi_cmd_mode_config(ctrl, 1);
 
-	len = mdss_dsi_cmds2buf_tx(ctrl, cmds, cnt);
+	len = mdss_dsi_cmds2buf_tx(ctrl, cmds, cnt, use_dma_tpg);
 	if (!len)
 		pr_err("%s: failed to call\n", __func__);
 
@@ -1491,7 +1480,7 @@ static struct dsi_cmd_desc pkt_size_cmd = {
  *
  */
 int mdss_dsi_cmds_rx(struct mdss_dsi_ctrl_pdata *ctrl,
-			struct dsi_cmd_desc *cmds, int rlen)
+			struct dsi_cmd_desc *cmds, int rlen, int use_dma_tpg)
 {
 	int data_byte, rx_byte, dlen, end;
 	int short_response, diff, pkt_size, ret = 0;
@@ -1573,7 +1562,10 @@ do_send:
 		mdss_dsi_wait4video_eng_busy(ctrl);
 
 		mdss_dsi_enable_irq(ctrl, DSI_CMD_TERM);
-		ret = mdss_dsi_cmd_dma_tx(ctrl, tp);
+		if (use_dma_tpg)
+			ret = mdss_dsi_cmd_dma_tpg_tx(ctrl, tp);
+		else
+			ret = mdss_dsi_cmd_dma_tx(ctrl, tp);
 		if (IS_ERR_VALUE(ret)) {
 			mdss_dsi_disable_irq(ctrl, DSI_CMD_TERM);
 			pr_err("%s: failed to tx max_pkt_size\n",
@@ -1606,7 +1598,10 @@ do_send:
 		mdss_dsi_wait4video_eng_busy(ctrl);	/* video mode only */
 		mdss_dsi_enable_irq(ctrl, DSI_CMD_TERM);
 		/* transmit read comamnd to client */
-		ret = mdss_dsi_cmd_dma_tx(ctrl, tp);
+		if (use_dma_tpg)
+			ret = mdss_dsi_cmd_dma_tpg_tx(ctrl, tp);
+		else
+			ret = mdss_dsi_cmd_dma_tx(ctrl, tp);
 		if (IS_ERR_VALUE(ret)) {
 			mdss_dsi_disable_irq(ctrl, DSI_CMD_TERM);
 			pr_err("%s: failed to tx cmd = 0x%x\n",
@@ -1707,8 +1702,6 @@ end:
 	return rp->read_cnt;
 }
 
-#define DMA_TX_TIMEOUT 200
-
 static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 					struct dsi_buf *tp)
 {
@@ -1779,6 +1772,25 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 
 	ret = wait_for_completion_timeout(&ctrl->dma_comp,
 				msecs_to_jiffies(DMA_TX_TIMEOUT));
+
+	if (ret <= 0) {
+		u32 reg_val, status, mask;
+
+		reg_val = MIPI_INP(ctrl->ctrl_base + 0x0110);/* DSI_INTR_CTRL */
+		mask = reg_val & DSI_INTR_CMD_DMA_DONE_MASK;
+		status = mask & reg_val;
+		if (status) {
+			pr_warn("dma tx done but irq not triggered\n");
+			reg_val &= DSI_INTR_MASK_ALL;
+			/* clear CMD DMA isr only */
+			reg_val |= DSI_INTR_CMD_DMA_DONE;
+			MIPI_OUTP(ctrl->ctrl_base + 0x0110, reg_val);
+			mdss_dsi_disable_irq_nosync(ctrl, DSI_MDP_TERM);
+			complete(&ctrl->dma_comp);
+			ret = 1;
+		}
+	}
+
 	if (ret == 0)
 		ret = -ETIMEDOUT;
 	else
@@ -2083,7 +2095,8 @@ int mdss_dsi_cmdlist_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 			ctrl->do_unicast = true;
 	}
 
-	len = mdss_dsi_cmds_tx(ctrl, req->cmds, req->cmds_cnt);
+	len = mdss_dsi_cmds_tx(ctrl, req->cmds, req->cmds_cnt,
+				(req->flags & CMD_REQ_DMA_TPG));
 
 	if (req->cb)
 		req->cb(len);
@@ -2099,7 +2112,8 @@ int mdss_dsi_cmdlist_rx(struct mdss_dsi_ctrl_pdata *ctrl,
 
 	if (req->rbuf) {
 		rp = &ctrl->rx_buf;
-		len = mdss_dsi_cmds_rx(ctrl, req->cmds, req->rlen);
+		len = mdss_dsi_cmds_rx(ctrl, req->cmds, req->rlen,
+				(req->flags & CMD_REQ_DMA_TPG));
 		memcpy(req->rbuf, rp->data, rp->len);
 		ctrl->rx_len = len;
 	} else {
@@ -2146,6 +2160,11 @@ int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp)
 		return rc;
 	}
 
+	mdss_dsi_get_hw_revision(ctrl);
+	/* For DSI versions less than 1.3.0, CMD DMA TPG is not supported */
+	if (ctrl->hw_rev < MDSS_DSI_HW_REV_103)
+		req->flags &= ~CMD_REQ_DMA_TPG;
+
 	pr_debug("%s: ctrl=%d from_mdp=%d pid=%d\n", __func__,
 				ctrl->ndx, from_mdp, current->pid);
 
@@ -2170,27 +2189,25 @@ int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp)
 
 	MDSS_XLOG(ctrl->ndx, req->flags, req->cmds_cnt, from_mdp, current->pid);
 
-	/*
-	 * mdss interrupt is generated in mdp core clock domain
-	 * mdp clock need to be enabled to receive dsi interrupt
-	 * also, axi bus bandwidth need since dsi controller will
-	 * fetch dcs commands from axi bus
-	 */
-	if (ctrl->mdss_util->bus_bandwidth_ctrl)
-		ctrl->mdss_util->bus_bandwidth_ctrl(1);
-
-	if (ctrl->mdss_util->bus_scale_set_quota)
-		ctrl->mdss_util->bus_scale_set_quota(MDSS_DSI_RT, SZ_1M, SZ_1M);
 
 	pr_debug("%s:  from_mdp=%d pid=%d\n", __func__, from_mdp, current->pid);
 	mdss_dsi_clk_ctrl(ctrl, DSI_ALL_CLKS, 1);
 
-	if (ctrl->mdss_util->iommu_ctrl) {
-		rc = ctrl->mdss_util->iommu_ctrl(1);
-		if (IS_ERR_VALUE(rc)) {
-			pr_err("IOMMU attach failed\n");
-			mutex_unlock(&ctrl->cmd_mutex);
-			return rc;
+	if (!(req->flags & CMD_REQ_DMA_TPG)) {
+		if (ctrl->mdss_util->bus_bandwidth_ctrl)
+			ctrl->mdss_util->bus_bandwidth_ctrl(1);
+
+		if (ctrl->mdss_util->bus_scale_set_quota)
+			ctrl->mdss_util->bus_scale_set_quota(MDSS_DSI_RT,
+								SZ_1M, SZ_1M);
+
+		if (ctrl->mdss_util->iommu_ctrl) {
+			rc = ctrl->mdss_util->iommu_ctrl(1);
+			if (IS_ERR_VALUE(rc)) {
+				pr_err("IOMMU attach failed\n");
+				mutex_unlock(&ctrl->cmd_mutex);
+				return rc;
+			}
 		}
 	}
 
@@ -2205,14 +2222,17 @@ int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp)
 	if (req->flags & CMD_REQ_HS_MODE)
 		mdss_dsi_set_tx_power_mode(1, &ctrl->panel_data);
 
-	if (ctrl->mdss_util->iommu_ctrl)
-		ctrl->mdss_util->iommu_ctrl(0);
+	if (!(req->flags & CMD_REQ_DMA_TPG)) {
+		if (ctrl->mdss_util->iommu_ctrl)
+			ctrl->mdss_util->iommu_ctrl(0);
+
+		if (ctrl->mdss_util->bus_scale_set_quota)
+			ctrl->mdss_util->bus_scale_set_quota(MDSS_DSI_RT, 0, 0);
+		if (ctrl->mdss_util->bus_bandwidth_ctrl)
+			ctrl->mdss_util->bus_bandwidth_ctrl(0);
+	}
 
 	mdss_dsi_clk_ctrl(ctrl, DSI_ALL_CLKS, 0);
-	if (ctrl->mdss_util->bus_scale_set_quota)
-		ctrl->mdss_util->bus_scale_set_quota(MDSS_DSI_RT, 0, 0);
-	if (ctrl->mdss_util->bus_bandwidth_ctrl)
-		ctrl->mdss_util->bus_bandwidth_ctrl(0);
 need_lock:
 
 	MDSS_XLOG(ctrl->ndx, from_mdp, ctrl->mdp_busy, current->pid,
@@ -2268,7 +2288,7 @@ static int dsi_event_thread(void *data)
 	struct mdss_dsi_ctrl_pdata *ctrl;
 	unsigned long flag;
 	struct sched_param param;
-	u32 todo = 0, ln_status;
+	u32 todo = 0, ln_status, force_clk_ln_hs;
 	u32 arg;
 	int ret;
 
@@ -2326,9 +2346,13 @@ static int dsi_event_thread(void *data)
 			 * clock lane is not in Stop State.
 			 */
 			ln_status = MIPI_INP(ctrl->ctrl_base + 0x00a8);
+			force_clk_ln_hs = (MIPI_INP(ctrl->ctrl_base + 0x00ac)
+					& BIT(28));
 			pr_debug("%s: lane_status: 0x%x\n",
 				       __func__, ln_status);
 			if (ctrl->recovery
+					&& (ctrl->hw_rev != MDSS_DSI_HW_REV_103)
+					&& !(force_clk_ln_hs)
 					&& (ln_status
 						& DSI_DATA_LANES_STOP_STATE)
 					&& !(ln_status
@@ -2434,7 +2458,22 @@ void mdss_dsi_fifo_status(struct mdss_dsi_ctrl_pdata *ctrl)
 	/* fifo underflow, overflow and empty*/
 	if (status & 0xcccc4489) {
 		MIPI_OUTP(base + 0x000c, status);
-		pr_err("%s: status=%x\n", __func__, status);
+
+		/*
+                 * During dynamic refresh rate update, DSI fifo errors are
+                 * expected, Check the dfps status and avoid the log. However,
+                 * FIFO errors needs to be cleared.
+                 */
+		if (!ctrl->dfps_status)
+			pr_err("%s: status=%x\n", __func__, status);
+
+		/*
+		 * if DSI FIFO overflow is masked,
+		 * do not report overflow error
+		 */
+		if (MIPI_INP(base + 0x10c) & 0xf0000)
+			status = status & 0xaaaaffff;
+
 		if (status & 0x44440000) {/* DLNx_HS_FIFO_OVERFLOW */
 			dsi_send_events(ctrl, DSI_EV_DLNx_FIFO_OVERFLOW, 0);
 			/* Ignore FIFO EMPTY when overflow happens */
@@ -2445,6 +2484,9 @@ void mdss_dsi_fifo_status(struct mdss_dsi_ctrl_pdata *ctrl)
 		if (status & 0x11110000) /* DLN_FIFO_EMPTY */
 			dsi_send_events(ctrl, DSI_EV_DSI_FIFO_EMPTY, 0);
 	}
+
+	if (ctrl->dfps_status)
+		ctrl->dfps_status = false;
 }
 
 void mdss_dsi_status(struct mdss_dsi_ctrl_pdata *ctrl)

@@ -19,15 +19,15 @@
 	aliases {
 		i2c3 = &i2c_3; /* I2C4 controller device */
 	};
-};
 
-&memory {
-	pstore_reserve_mem: pstore_reserve_mem_region@0 {
-		linux,reserve-contiguous-region;
-		linux,reserve-region;
-		linux,remove-completely;
-		reg = <0x0 0x9ff00000 0x0 0x00100000>;
-		label = "pstore_reserve_mem";
+	memory {
+		pstore_reserve_mem: pstore_reserve_mem_region@0 {
+			linux,reserve-contiguous-region;
+			linux,reserve-region;
+			linux,remove-completely;
+			reg = <0x0 0x8c300000 0x0 0x00100000>;
+			label = "pstore_reserve_mem";
+		};
 	};
 };
 
@@ -36,7 +36,7 @@
 		compatible = "ramoops";
 		status = "ok";
 
-		android,ramoops-buffer-start = <0x9ff00000>;
+		android,ramoops-buffer-start = <0x8c300000>;
 		android,ramoops-buffer-size = <0x100000>;
 		android,ramoops-console-size = <0x80000>;
 		android,ramoops-record-size = <0x7F800>;
@@ -200,7 +200,7 @@
 
 	sound {
 		compatible = "qcom,msm8x16-audio-codec";
-		qcom,model = "msm8x16-t86519a1-snd-card";
+		qcom,model = "msm8x16-skui-snd-card";
 		qcom,msm-snd-card-id = <0>;
 		qcom,msm-ext-pa = "quaternary";
 		qcom,msm-codec-type = "internal";
@@ -240,10 +240,10 @@
 				<&dai_mi2s0>, <&dai_mi2s1>, <&dai_mi2s2>, <&dai_mi2s3>,
 				<&sb_0_rx>, <&sb_0_tx>, <&sb_1_rx>, <&sb_1_tx>,
 				<&sb_3_rx>, <&sb_3_tx>, <&sb_4_rx>, <&sb_4_tx>,
-				<&bt_sco_rx>, <&bt_sco_tx>, <&int_fm_rx>, <&int_fm_tx>,
-				<&afe_pcm_rx>, <&afe_pcm_tx>, <&afe_proxy_rx>,
-				<&afe_proxy_tx>, <&incall_record_rx>,
-				<&incall_record_tx>, <&incall_music_rx>,
+				<&bt_sco_rx>, <&bt_sco_tx>, <&bt_a2dp_rx>,
+				<&int_fm_rx>, <&int_fm_tx>,
+				<&afe_pcm_rx>, <&afe_pcm_tx>, <&afe_proxy_rx>, <&afe_proxy_tx>,
+				<&incall_record_rx>, <&incall_record_tx>, <&incall_music_rx>,
 				<&incall_music_2_rx>;
 		asoc-cpu-names = "msm-dai-q6-auxpcm.1", "msm-dai-q6-hdmi.8",
 				"msm-dai-q6-mi2s.0", "msm-dai-q6-mi2s.1",
@@ -253,11 +253,12 @@
 				"msm-dai-q6-dev.16390", "msm-dai-q6-dev.16391",
 				"msm-dai-q6-dev.16392", "msm-dai-q6-dev.16393",
 				"msm-dai-q6-dev.12288", "msm-dai-q6-dev.12289",
-				"msm-dai-q6-dev.12292", "msm-dai-q6-dev.12293",
-				"msm-dai-q6-dev.224", "msm-dai-q6-dev.225",
-				"msm-dai-q6-dev.241", "msm-dai-q6-dev.240",
-				"msm-dai-q6-dev.32771", "msm-dai-q6-dev.32772",
-				"msm-dai-q6-dev.32773", "msm-dai-q6-dev.32770";
+				"msm-dai-q6-dev.12290", "msm-dai-q6-dev.12292",
+				"msm-dai-q6-dev.12293", "msm-dai-q6-dev.224",
+				"msm-dai-q6-dev.225", "msm-dai-q6-dev.241",
+				"msm-dai-q6-dev.240", "msm-dai-q6-dev.32771",
+				"msm-dai-q6-dev.32772", "msm-dai-q6-dev.32773",
+				"msm-dai-q6-dev.32770";
 		asoc-codec = <&stub_codec>, <&pm8916_tombak_dig>;
 		asoc-codec-names = "msm-stub-codec.1", "tombak_codec";
 	};

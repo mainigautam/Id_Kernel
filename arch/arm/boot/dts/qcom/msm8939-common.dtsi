@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -32,7 +32,7 @@
 		i2c5 = &i2c_5;
 		i2c6 = &i2c_6;
 		spi0 = &spi_0;
-		/*spi5 = &spi_5;*/
+		spi5 = &spi_5;
 	};
 
 	memory {
@@ -469,7 +469,7 @@
 		interrupts = <0 145 0 0 146 0>;
 		interrupt-names = "wcnss_wlantx_irq", "wcnss_wlanrx_irq";
 
-		qcom,pronto-vddmx-supply = <&pm8916_l3>;
+		qcom,pronto-vddmx-supply = <&pm8916_l3_corner_ao>;
 		qcom,pronto-vddcx-supply = <&pm8916_s2_corner>;
 		qcom,pronto-vddpx-supply = <&pm8916_l7>;
 		qcom,iris-vddxo-supply   = <&pm8916_l7>;
@@ -488,8 +488,10 @@
 		clocks = <&clock_rpm clk_xo_wlan_clk>,
 			 <&clock_rpm clk_rf_clk2>,
 			 <&clock_debug clk_gcc_debug_mux>,
-			 <&clock_gcc clk_wcnss_m_clk>;
-		clock-names = "xo", "rf_clk", "measure", "wcnss_debug";
+			 <&clock_gcc clk_wcnss_m_clk>,
+			 <&clock_gcc clk_gcc_snoc_qosgen_clk>;
+		clock-names = "xo", "rf_clk", "measure", "wcnss_debug",
+				"snoc_qosgen";
 
 		qcom,has-autodetect-xo;
 		qcom,is-pronto-vt;
@@ -688,6 +690,8 @@
                 qcom,use-sw-aes-xts-algo;
                 qcom,use-sw-aes-ccm-algo;
                 qcom,use-sw-ahash-algo;
+		qcom,use-sw-hmac-algo;
+		qcom,use-sw-aead-algo;
 		status = "disabled";
 		qcom,ce-opp-freq = <100000000>;
 	};
@@ -789,7 +793,7 @@
 		qcom,vdd-voltage-level = <1 5 7>;
 
 		qcom,hsusb-otg-phy-init-seq =
-			<0x44 0x80 0x6E 0x81 0x30 0x82 0x33 0x83 0xffffffff>;
+			<0x44 0x80 0x6B 0x81 0x24 0x82 0x13 0x83 0xffffffff>;
 		qcom,hsusb-otg-phy-type = <2>;
 		qcom,hsusb-otg-mode = <1>;
 		qcom,hsusb-otg-otg-control = <2>;
@@ -823,7 +827,7 @@
 		reg = <0x086000c8 0xc8>;
 		qcom,pm-qos-latency = <2 1001 12701>;
 		qcom,streaming-func = "rndis","mtp";
-		qcom,android-usb-uicc-nluns = /bits/ 8 <0>;
+		qcom,android-usb-uicc-nluns = /bits/ 8 <1>;
 	};
 
 	uicc: qcom,ehci-host@79c0000 {
@@ -989,8 +993,8 @@
 		dma-names = "tx", "rx";
 		qcom,master-id = <86>;
 	};
-/*
-	spi_5: spi@78b9000 {
+
+	spi_5: spi@78b9000 {  /* BLSP1 QUP5 */
 		compatible = "qcom,spi-qup-v2";
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -1016,7 +1020,7 @@
 		qcom,rt-priority;
 		status = "disabled";
 	};
-*/
+
 	spmi_bus: qcom,spmi@200f000 {
 		compatible = "qcom,spmi-pmic-arb";
 		reg = <0x200f000 0x1000>,
@@ -1126,7 +1130,7 @@
 			 <&clock_gcc clk_gcc_sdcc2_apps_clk>;
 		clock-names = "iface_clk", "core_clk";
 
-		qcom,clk-rates = <400000 25000000 50000000 100000000 177770000>;
+		qcom,clk-rates = <400000 25000000 50000000 100000000 200000000>;
 
 		status = "disabled";
 	};
@@ -1165,7 +1169,6 @@
 		clock-frequency = <32768>;
 	};
 
-/*
 	blsp1_uart1: serial@78af000 {
 		compatible = "qcom,msm-hsuart-v14";
 		reg = <0x78af000 0x200>,
@@ -1193,11 +1196,9 @@
 				<86 512 500 800>;
 		pinctrl-names = "default", "sleep";
 		pinctrl-0 = <&hsuart_active>;
-		pinctrl-1 = <&hsuart_sleep>;  
-	
+		pinctrl-1 = <&hsuart_sleep>;
 		status = "disabled";
 	};
-*/
 
 	qcom,venus@1de0000 {
 		compatible = "qcom,pil-tz-generic";
@@ -1418,6 +1419,11 @@
 		bt_sco_tx: qcom,msm-dai-q6-bt-sco-tx {
 			compatible = "qcom,msm-dai-q6-dev";
 			qcom,msm-dai-q6-dev-id = <12289>;
+		};
+
+		bt_a2dp_rx: qcom,msm-dai-q6-bt-a2dp-rx {
+			compatible = "qcom,msm-dai-q6-dev";
+			qcom,msm-dai-q6-dev-id = <12290>;
 		};
 
 		int_fm_rx: qcom,msm-dai-q6-int-fm-rx {
