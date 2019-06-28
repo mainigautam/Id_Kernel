@@ -5935,4 +5935,3 @@ static void __exit q6asm_exit(void)
 
 device_initcall(q6asm_init);
 __exitcall(q6asm_exit);
-

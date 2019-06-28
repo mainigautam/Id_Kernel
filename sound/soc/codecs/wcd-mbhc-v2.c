@@ -455,7 +455,8 @@ static void wcd_mbhc_set_and_turnoff_hph_padac(struct wcd_mbhc *mbhc)
 		pr_debug("%s PA is off\n", __func__);
 	}
 	snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_RX_HPH_CNP_EN,
-			    0x30, 0x00);
+			    0x30, 0x10);
+       //0x00->0x10,Bug 69777 - 【通话】插上耳机进行通话，通话过程中打开免提，然后拔掉耳机，通话无声音
 	usleep_range(wg_time * 1000, wg_time * 1000 + 50);
 }
 

@@ -79,6 +79,8 @@
  */
 #define ADSP_STATE_READY_TIMEOUT_MS 50
 
+static bool current_ext_spk_pa_state = false;
+
 #define HPHL_PA_DISABLE (0x01 << 1)
 #define HPHR_PA_DISABLE (0x01 << 2)
 #define EAR_PA_DISABLE (0x01 << 3)
@@ -648,12 +650,12 @@ static void msm8x16_wcd_boost_on(struct snd_soc_codec *codec)
 	snd_soc_update_bits(codec,
 		MSM8X16_WCD_A_DIGITAL_PERPH_RESET_CTL3,
 		0x0F, 0x0F);
-	snd_soc_write(codec,
+	snd_soc_update_bits(codec,
 		MSM8X16_WCD_A_ANALOG_SEC_ACCESS,
-		0xA5);
-	snd_soc_write(codec,
+		0xA5, 0xA5);
+	snd_soc_update_bits(codec,
 		MSM8X16_WCD_A_ANALOG_PERPH_RESET_CTL3,
-		0x0F);
+		0x0F, 0x0F);
 	snd_soc_write(codec,
 		MSM8X16_WCD_A_ANALOG_MASTER_BIAS_CTL,
 		0x30);
@@ -697,12 +699,12 @@ static void msm8x16_wcd_boost_off(struct snd_soc_codec *codec)
 
 static void msm8x16_wcd_bypass_on(struct snd_soc_codec *codec)
 {
-	snd_soc_write(codec,
+	snd_soc_update_bits(codec,
 		MSM8X16_WCD_A_ANALOG_SEC_ACCESS,
-		0xA5);
-	snd_soc_write(codec,
+		0xA5, 0xA5);
+	snd_soc_update_bits(codec,
 		MSM8X16_WCD_A_ANALOG_PERPH_RESET_CTL3,
-		0x07);
+		0x07, 0x07);
 	snd_soc_update_bits(codec,
 		MSM8X16_WCD_A_ANALOG_BYPASS_MODE,
 		0x02, 0x02);
@@ -1246,7 +1248,7 @@ static int msm8x16_wcd_pa_gain_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
 
 	dev_dbg(codec->dev, "%s: ucontrol->value.integer.value[0] = %ld\n",
-		__func__, ucontrol->value.integer.value[0]);
+		 __func__, ucontrol->value.integer.value[0]);
 
 	switch (ucontrol->value.integer.value[0]) {
 	case 0:
@@ -1260,10 +1262,85 @@ static int msm8x16_wcd_pa_gain_put(struct snd_kcontrol *kcontrol,
 	}
 
 	snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_RX_EAR_CTL,
-			    0x20, ear_pa_gain);
+				0x20, ear_pa_gain);
 	return 0;
 }
 
+static void set_gpio_enable(struct msm8x16_wcd_priv *msm8x16_wcd)
+{
+	//printk(KERN_ERR "%s:JackChen in here\n", __func__);
+	gpio_direction_output(ext_spk_pa_gpio, 1);  
+        udelay(2);
+        gpio_direction_output(ext_spk_pa_gpio, 0);  
+        udelay(2);
+       	gpio_direction_output(ext_spk_pa_gpio, 1);
+        current_ext_spk_pa_state = true; 	
+}
+
+static void set_gpio_enable_work(struct work_struct *work)
+{
+	struct msm8x16_wcd_priv *msm8x16_wcd_priv = container_of(work, struct msm8x16_wcd_priv,
+						  work.work);
+
+	set_gpio_enable(msm8x16_wcd_priv);
+}
+
+static int msm8x16_wcd_ext_spk_get(struct snd_kcontrol *kcontrol, 
+				struct snd_ctl_elem_value *ucontrol) 
+{ 
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol); 
+ 
+	if (current_ext_spk_pa_state == false) { 
+		ucontrol->value.integer.value[0] = 0; 
+	} else if (current_ext_spk_pa_state == true) { 
+		ucontrol->value.integer.value[0] = 1; 
+	} else { 
+		dev_err(codec->dev, "%s: ERROR: Unsupported Speaker ext = %d\n", __func__, current_ext_spk_pa_state); 
+		return -EINVAL; 
+	} 
+
+	//dev_err(codec->dev, "%s: current_ext_spk_pa_state = %d\n", __func__, current_ext_spk_pa_state); 
+
+	return 0; 
+} 
+ 
+static int msm8x16_wcd_ext_spk_set(struct snd_kcontrol *kcontrol, 
+				struct snd_ctl_elem_value *ucontrol) 
+{ 
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct msm8x16_wcd_priv *msm8x16_wcd = snd_soc_codec_get_drvdata(codec);
+ 
+	//dev_err(codec->dev, "%s: ucontrol->value.integer.value[0] = %ld\n", __func__, ucontrol->value.integer.value[0]); 
+ 
+	switch (ucontrol->value.integer.value[0]) { 
+	case 0: 
+		if(gpio_is_valid(ext_spk_pa_gpio)){ 
+			gpio_direction_output(ext_spk_pa_gpio, 0); 
+			current_ext_spk_pa_state = false;
+		} 
+		break; 
+	case 1: 
+		if(gpio_is_valid(ext_spk_pa_gpio)){	
+			#if 0	
+			gpio_direction_output(ext_spk_pa_gpio, 1); 
+			udelay(2);
+			gpio_direction_output(ext_spk_pa_gpio, 0); 
+			udelay(2);
+			gpio_direction_output(ext_spk_pa_gpio, 1);
+			current_ext_spk_pa_state = true; 
+			#endif
+			schedule_delayed_work(&msm8x16_wcd->work, msecs_to_jiffies(10));
+			//modify for bug 70396
+			} 
+		break; 
+	default: 
+		return -EINVAL; 
+	}
+ 
+	//dev_err(codec->dev, "%s: current_ext_spk_pa_state = %d\n", __func__, current_ext_spk_pa_state); 
+
+	return 0; 
+} 
 
 static int msm8x16_wcd_boost_option_get(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
@@ -1635,6 +1712,12 @@ static const struct soc_enum msm8x16_wcd_spk_boost_ctl_enum[] = {
 		SOC_ENUM_SINGLE_EXT(2, msm8x16_wcd_spk_boost_ctrl_text),
 };
 
+static const char * const msm8x16_wcd_ext_spk_ctrl_text[] = { 
+		"DISABLE", "ENABLE"}; 
+static const struct soc_enum msm8x16_wcd_ext_spk_ctl_enum[] = { 
+		SOC_ENUM_SINGLE_EXT(2, msm8x16_wcd_ext_spk_ctrl_text), 
+}; 
+
 static const char * const msm8x16_wcd_ext_spk_boost_ctrl_text[] = {
 		"DISABLE", "ENABLE"};
 static const struct soc_enum msm8x16_wcd_ext_spk_boost_ctl_enum[] = {
@@ -1674,6 +1757,9 @@ static const struct snd_kcontrol_new msm8x16_wcd_snd_controls[] = {
 
 	SOC_ENUM_EXT("Speaker Boost", msm8x16_wcd_spk_boost_ctl_enum[0],
 		msm8x16_wcd_spk_boost_get, msm8x16_wcd_spk_boost_set),
+
+	SOC_ENUM_EXT("Speaker Ext", msm8x16_wcd_ext_spk_ctl_enum[0], 
+		msm8x16_wcd_ext_spk_get, msm8x16_wcd_ext_spk_set), 
 
 	SOC_ENUM_EXT("Ext Spk Boost", msm8x16_wcd_ext_spk_boost_ctl_enum[0],
 		msm8x16_wcd_ext_spk_boost_get, msm8x16_wcd_ext_spk_boost_set),
@@ -3993,7 +4079,7 @@ static const struct msm8x16_wcd_reg_mask_val
 	/* Initialize current threshold to 350MA
 	 * number of wait and run cycles to 4096
 	 */
-	{MSM8X16_WCD_A_ANALOG_RX_COM_OCP_CTL, 0xFF, 0x12},
+	{MSM8X16_WCD_A_ANALOG_RX_COM_OCP_CTL, 0xFF, 0xD1},
 	{MSM8X16_WCD_A_ANALOG_RX_COM_OCP_COUNT, 0xFF, 0xFF},
 };
 
@@ -4010,22 +4096,8 @@ static void msm8x16_wcd_codec_init_reg(struct snd_soc_codec *codec)
 
 static int msm8x16_wcd_bringup(struct snd_soc_codec *codec)
 {
-	snd_soc_write(codec,
-		MSM8X16_WCD_A_DIGITAL_SEC_ACCESS,
-		0xA5);
 	snd_soc_write(codec, MSM8X16_WCD_A_DIGITAL_PERPH_RESET_CTL4, 0x01);
-	snd_soc_write(codec,
-		MSM8X16_WCD_A_ANALOG_SEC_ACCESS,
-		0xA5);
 	snd_soc_write(codec, MSM8X16_WCD_A_ANALOG_PERPH_RESET_CTL4, 0x01);
-	snd_soc_write(codec,
-		MSM8X16_WCD_A_DIGITAL_SEC_ACCESS,
-		0xA5);
-	snd_soc_write(codec, MSM8X16_WCD_A_DIGITAL_PERPH_RESET_CTL4, 0x00);
-	snd_soc_write(codec,
-		MSM8X16_WCD_A_ANALOG_SEC_ACCESS,
-		0xA5);
-	snd_soc_write(codec, MSM8X16_WCD_A_ANALOG_PERPH_RESET_CTL4, 0x00);
 	return 0;
 }
 
@@ -4057,47 +4129,6 @@ static int msm8x16_wcd_device_down(struct snd_soc_codec *codec)
 		MSM8X16_WCD_A_ANALOG_TX_1_EN, 0x3);
 	msm8x16_wcd_write(codec,
 		MSM8X16_WCD_A_ANALOG_TX_2_EN, 0x3);
-	if (msm8x16_wcd_priv->boost_option == BOOST_ON_FOREVER) {
-		if ((snd_soc_read(codec, MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL)
-			& 0x80) == 0) {
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_CDC_CLK_MCLK_CTL,	0x01, 0x01);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_CDC_CLK_PDM_CTL, 0x03, 0x03);
-			snd_soc_write(codec,
-				MSM8X16_WCD_A_ANALOG_MASTER_BIAS_CTL, 0x30);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_DIGITAL_CDC_RST_CTL, 0x80, 0x80);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_DIGITAL_CDC_TOP_CLK_CTL,
-				0x0C, 0x0C);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_DIGITAL_CDC_DIG_CLK_CTL,
-				0x84, 0x84);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_DIGITAL_CDC_ANA_CLK_CTL,
-				0x10, 0x10);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_SPKR_PWRSTG_CTL,
-				0x1F, 0x1F);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_RX_COM_BIAS_DAC,
-				0x90, 0x90);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_RX_EAR_CTL,
-				0xFF, 0xFF);
-			usleep_range(20, 21);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_SPKR_PWRSTG_CTL,
-				0xFF, 0xFF);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL,
-				0xE9, 0xE9);
-		}
-	}
-	msm8x16_wcd_boost_off(codec);
-	/* 40ms to allow boost to discharge */
-	msleep(40);
 	/* Disable PA to avoid pop during codec bring up */
 	snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_RX_HPH_CNP_EN,
 			0x30, 0x00);
@@ -4112,7 +4143,8 @@ static int msm8x16_wcd_device_down(struct snd_soc_codec *codec)
 	msm8x16_wcd_write(codec,
 		MSM8X16_WCD_A_ANALOG_SPKR_DAC_CTL, 0x93);
 
-	msm8x16_wcd_bringup(codec);
+	msm8x16_wcd_write(codec, MSM8X16_WCD_A_DIGITAL_PERPH_RESET_CTL4, 0x1);
+	msm8x16_wcd_write(codec, MSM8X16_WCD_A_ANALOG_PERPH_RESET_CTL4, 0x1);
 	atomic_set(&pdata->mclk_enabled, false);
 	set_bit(BUS_DOWN, &msm8x16_wcd_priv->status_mask);
 	snd_soc_card_change_online_state(codec->card, 0);
@@ -4151,17 +4183,13 @@ static int msm8x16_wcd_device_up(struct snd_soc_codec *codec)
 	/* delay is required to make sure sound card state updated */
 	usleep_range(5000, 5100);
 
+	msm8x16_wcd_bringup(codec);
 	msm8x16_wcd_codec_init_reg(codec);
 	msm8x16_wcd_update_reg_defaults(codec);
 
 	msm8x16_wcd_set_boost_v(codec);
 
 	msm8x16_wcd_set_micb_v(codec);
-	if (msm8x16_wcd_priv->boost_option == BOOST_ON_FOREVER)
-		msm8x16_wcd_boost_on(codec);
-	else if (msm8x16_wcd_priv->boost_option == BYPASS_ALWAYS)
-		msm8x16_wcd_bypass_on(codec);
-
 	msm8x16_wcd_configure_cap(codec, false, false);
 	wcd_mbhc_stop(&msm8x16_wcd_priv->mbhc);
 	wcd_mbhc_start(&msm8x16_wcd_priv->mbhc,
@@ -4411,6 +4439,10 @@ static int msm8x16_wcd_codec_probe(struct snd_soc_codec *codec)
 		registered_codec = NULL;
 		return -ENOMEM;
 	}
+	
+	//chenjian
+	INIT_DELAYED_WORK(&msm8x16_wcd_priv->work, set_gpio_enable_work);
+	
 	return 0;
 }
 
@@ -4425,6 +4457,9 @@ static int msm8x16_wcd_codec_remove(struct snd_soc_codec *codec)
 	msm8x16_wcd_priv->on_demand_list[ON_DEMAND_MICBIAS].supply = NULL;
 	atomic_set(&msm8x16_wcd_priv->on_demand_list[ON_DEMAND_MICBIAS].ref, 0);
 	iounmap(msm8x16_wcd->dig_base);
+	//chenjian
+	cancel_delayed_work_sync(&msm8x16_wcd_priv->work);
+
 	kfree(msm8x16_wcd_priv->fw_data);
 	kfree(msm8x16_wcd_priv);
 
@@ -4688,7 +4723,7 @@ static int msm8x16_wcd_spmi_probe(struct spmi_device *spmi)
 		__func__, __LINE__,  spmi->sid);
 
 	modem_state = apr_get_modem_state();
-	if (modem_state == APR_SUBSYS_DOWN) {
+	if (modem_state != APR_SUBSYS_LOADED) {
 		dev_dbg(&spmi->dev, "Modem is not loaded yet %d\n",
 				modem_state);
 		return -EPROBE_DEFER;
