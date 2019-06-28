@@ -692,7 +692,6 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 			cdata->cfg.sensor_info.sensor_mount_angle);
 
 		break;
-	case CFG_SET_OTP_INIT_PARAM:
 	case CFG_GET_SENSOR_INIT_PARAMS:
 		cdata->cfg.sensor_init_params.modes_supported =
 			s_ctrl->sensordata->sensor_info->modes_supported;

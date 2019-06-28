@@ -15,6 +15,7 @@
 
 #include "msm8929.dtsi"
 #include "msm8939-cdp.dtsi"
+#include "msm8939-regulator.dtsi"
 
 / {
 	model = "Qualcomm Technologies, Inc. MSM 8929 JDI CDP";
@@ -31,7 +32,7 @@
 &i2c_5 {  /* BLSP1 QUP5 */
 	status = "disabled";
 };
-
+/*
 &spi_5 {
 	status = "okay";
 	bu21150-ts-spi@0 {
@@ -58,7 +59,7 @@
 		jdi,afe-vendor = "rohm";
 	};
 };
-
+*/
 #include "dsi-panel-jdi-fhd-video.dtsi"
 #include "msm8939-mdss.dtsi"
 
