@@ -366,4 +366,6 @@ wlan_hdd_tdls_disable_offchan_and_teardown_links(hdd_context_t *pHddCtx)
 }
 #endif
 
+void wlan_hdd_get_tdls_stats(hdd_adapter_t *pAdapter);
+
 #endif // __HDD_TDSL_H
