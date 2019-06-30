@@ -126,9 +126,7 @@ when        who    what, where, why
    This dynamically changes ACK_POLICY = TRUE for multicast frames */
 #define WDI_RELIABLE_MCAST_REQUESTED_MASK 0x100
 
-#define WDI_USE_BD_RATE_1_MASK            0x1000
-#define WDI_USE_BD_RATE_2_MASK            0x2000
-#define WDI_USE_BD_RATE_3_MASK            0x4000
+#define WDI_USE_BD_RATE_MASK              0x1000
 #define WDI_USE_FW_IN_TX_PATH             0x200 //bit 9 used to route the frames to Work Queue 5
 
 /*Macro for getting the size of the TX BD*/
@@ -225,8 +223,6 @@ when        who    what, where, why
 
 #endif
 
-#define WDI_RXBD_MLME_STA_STATUS 0x1
-#define WDI_RXBD_SAP_TX_STATS  0x2
 /*--------------------------------------------------------------------------
    BD header macros - used by the data path to get or set various values
    inside the packet BD 
@@ -311,8 +307,6 @@ when        who    what, where, why
 #ifdef WLAN_FEATURE_EXTSCAN
 #define WDI_RX_BD_GET_EXTSCANFULLSCANRESIND( _pvBDHeader ) (((WDI_RxBdType*)_pvBDHeader)->extscanBuffer)
 #endif
-
-#define WDI_RX_BD_GET_PER_SAPOFFLOAD( _pvBDHeader )     (((WDI_RxBdType*)_pvBDHeader)->indType)
 
 /*------------ RSSI and SNR Information extraction -------------*/
 #define WDI_RX_BD_GET_RSSI0( _pvBDHeader )  \

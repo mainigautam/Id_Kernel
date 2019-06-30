@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2013 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -45,7 +45,7 @@
 #include "sirMacPropExts.h"
 #include "sirCommon.h"
 #include "sirDebug.h"
-#include "wniCfg.h"
+#include "wniCfgSta.h"
 #include "csrApi.h"
 #include "sapApi.h"
 #include "dot11f.h"
@@ -272,11 +272,6 @@ typedef struct sLimMlmJoinReq
     tSirMacRateSet         operationalRateSet;
     tANI_U8                 sessionId;
     tSirBssDescription     bssDescription;
-    /*
-     * WARNING: Pls make bssDescription as last variable in struct
-     * tLimMlmJoinReq as it has ieFields followed after this bss
-     * description. Adding a variable after this corrupts the ieFields
-     */
 } tLimMlmJoinReq, *tpLimMlmJoinReq;
 
 typedef struct sLimMlmScanReq
@@ -287,8 +282,8 @@ typedef struct sLimMlmScanReq
     tSirScanType       scanType;
     tANI_U32           minChannelTime;
     tANI_U32           maxChannelTime;
-    tANI_U32           min_chntime_btc_esco;
-    tANI_U32           max_chntime_btc_esco;
+    tANI_U32           minChannelTimeBtc;
+    tANI_U32           maxChannelTimeBtc;
     tSirBackgroundScanMode  backgroundScanMode;
     tANI_U32 dot11mode;
     /* Number of SSIDs to scan(send Probe request) */
@@ -362,8 +357,6 @@ typedef struct tLimPreAuthNode
     tANI_U8             fFree:1;
     tANI_U8             rsvd:5;
     TX_TIMER            timer;
-    tANI_U16            seqNo;
-    v_TIME_t            timestamp;
 }tLimPreAuthNode, *tpLimPreAuthNode;
 
 // Pre-authentication table definition
@@ -675,6 +668,14 @@ typedef struct sLimSpecMgmtInfo
     tANI_BOOLEAN       fRadarDetCurOperChan; /* Radar detected in cur oper chan on AP */
     tANI_BOOLEAN       fRadarIntrConfigured; /* Whether radar interrupt has been configured */
 }tLimSpecMgmtInfo, *tpLimSpecMgmtInfo;
+
+#ifdef FEATURE_WLAN_TDLS_INTERNAL
+typedef struct sLimDisResultList
+{
+    struct sLimDisResultList *next ;
+    tSirTdlsPeerInfo tdlsDisPeerInfo ;
+}tLimDisResultList ;
+#endif
 
 #ifdef FEATURE_WLAN_TDLS
 /*

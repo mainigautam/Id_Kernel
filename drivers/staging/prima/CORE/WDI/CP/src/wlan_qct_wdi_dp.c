@@ -414,7 +414,7 @@ WDI_FillTxBd
     ucSubType = (ucTypeSubtype & WDI_FRAME_SUBTYPE_MASK);
 
     WPAL_TRACE( eWLAN_MODULE_DAL_CTRL, eWLAN_PAL_TRACE_LEVEL_WARN, 
-               "Type: %d/%d, MAC S: %08x. MAC D: %08x., Tid=%d, frmXlat=%d, pTxBD=%pK ucTxFlag 0x%X",
+               "Type: %d/%d, MAC S: %08x. MAC D: %08x., Tid=%d, frmXlat=%d, pTxBD=%p ucTxFlag 0x%X",
                 ucType, ucSubType, 
                 *((wpt_uint32 *) pAddr2), 
                *((wpt_uint32 *) pDestMacAddr), 
@@ -553,17 +553,9 @@ WDI_FillTxBd
         }
 #endif
 
-        if(ucTxFlag & WDI_USE_BD_RATE_1_MASK)
+        if(ucTxFlag & WDI_USE_BD_RATE_MASK)
         {
             pBd->bdRate = WDI_BDRATE_BCDATA_FRAME;
-        }
-        else if(ucTxFlag & WDI_USE_BD_RATE_2_MASK)
-        {
-            pBd->bdRate = WDI_BDRATE_BCMGMT_FRAME;
-        }
-        else if(ucTxFlag & WDI_USE_BD_RATE_3_MASK)
-        {
-            pBd->bdRate = WDI_BDRATE_CTRL_FRAME;
         }
 
         pBd->rmf    = WDI_RMF_DISABLED;     

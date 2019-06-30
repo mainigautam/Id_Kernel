@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2016-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -112,23 +112,20 @@ tpPESession peCreateSession(tpAniSirGlobal pMac, tANI_U8 *bssid , tANI_U8* sessi
             vos_mem_set((void*)&pMac->lim.gpSession[i], sizeof(tPESession), 0);
 
             //Allocate space for Station Table for this session.
-            pMac->lim.gpSession[i].dph.dphHashTable.pHashTable = vos_mem_vmalloc(
+            pMac->lim.gpSession[i].dph.dphHashTable.pHashTable = vos_mem_malloc(
                                                   sizeof(tpDphHashNode)*numSta);
             if ( NULL == pMac->lim.gpSession[i].dph.dphHashTable.pHashTable )
             {
-                limLog(pMac, LOGE, FL("memory allocate for size %lu failed!"),
-                            (long unsigned int) sizeof(tpDphHashNode)*numSta);
+                limLog(pMac, LOGE, FL("memory allocate failed!"));
                 return NULL;
             }
 
-            pMac->lim.gpSession[i].dph.dphHashTable.pDphNodeArray = vos_mem_vmalloc(
+            pMac->lim.gpSession[i].dph.dphHashTable.pDphNodeArray = vos_mem_malloc(
                                                        sizeof(tDphHashNode)*numSta);
             if ( NULL == pMac->lim.gpSession[i].dph.dphHashTable.pDphNodeArray )
             {
-                limLog(pMac, LOGE, FL("memory allocate failed for Node array"
-                                                               "of size %lu"),
-                             (long unsigned int) sizeof(tDphHashNode)*numSta);
-                vos_mem_vfree(pMac->lim.gpSession[i].dph.dphHashTable.pHashTable);
+                limLog(pMac, LOGE, FL("memory allocate failed!"));
+                vos_mem_free(pMac->lim.gpSession[i].dph.dphHashTable.pHashTable);
                 pMac->lim.gpSession[i].dph.dphHashTable.pHashTable = NULL;
                 return NULL;
             }
@@ -137,15 +134,13 @@ tpPESession peCreateSession(tpAniSirGlobal pMac, tANI_U8 *bssid , tANI_U8* sessi
             dphHashTableClassInit(pMac, 
                            &pMac->lim.gpSession[i].dph.dphHashTable);
 
-            pMac->lim.gpSession[i].gpLimPeerIdxpool = vos_mem_vmalloc(sizeof(
+            pMac->lim.gpSession[i].gpLimPeerIdxpool = vos_mem_malloc(sizeof(
                                 *pMac->lim.gpSession[i].gpLimPeerIdxpool) * (numSta+1));
             if ( NULL == pMac->lim.gpSession[i].gpLimPeerIdxpool )
             {
-                limLog(pMac, LOGE, FL("memory allocate failed "
-                "for peerId pool of size %lu!"), (long unsigned int)
-                sizeof(*pMac->lim.gpSession[i].gpLimPeerIdxpool) * (numSta+1));
-                vos_mem_vfree(pMac->lim.gpSession[i].dph.dphHashTable.pHashTable);
-                vos_mem_vfree(pMac->lim.gpSession[i].dph.dphHashTable.pDphNodeArray);
+                PELOGE(limLog(pMac, LOGE, FL("memory allocate failed!"));)
+                vos_mem_free(pMac->lim.gpSession[i].dph.dphHashTable.pHashTable);
+                vos_mem_free(pMac->lim.gpSession[i].dph.dphHashTable.pDphNodeArray);
                 pMac->lim.gpSession[i].dph.dphHashTable.pHashTable = NULL;
                 pMac->lim.gpSession[i].dph.dphHashTable.pDphNodeArray = NULL;
                 return NULL;
@@ -239,20 +234,6 @@ tpPESession peFindSessionByBssid(tpAniSirGlobal pMac,  tANI_U8*  bssid,    tANI_
 
 }
 
-tANI_S8 limGetInfraSessionId(tpAniSirGlobal pMac)
-{
-    tANI_U8 i;
-    for (i = 0; i < pMac->lim.maxBssId; i++)
-    {
-        if ((pMac->lim.gpSession[i].valid) &&
-           (pMac->lim.gpSession[i].limSystemRole == eLIM_STA_ROLE))
-        {
-            return i;
-        }
-    }
-    limLog(pMac, LOG4, FL("Session lookup fails for infra mode"));
-    return -1;
-}
 
 /*--------------------------------------------------------------------------
   \brief peFindSessionByBssIdx() - looks up the PE session given the bssIdx.
@@ -420,19 +401,19 @@ void peDeleteSession(tpAniSirGlobal pMac, tpPESession psessionEntry)
 
     if(psessionEntry->dph.dphHashTable.pHashTable != NULL)
     {
-        vos_mem_vfree(psessionEntry->dph.dphHashTable.pHashTable);
+        vos_mem_free(psessionEntry->dph.dphHashTable.pHashTable);
         psessionEntry->dph.dphHashTable.pHashTable = NULL;
     }
 
     if(psessionEntry->dph.dphHashTable.pDphNodeArray != NULL)
     {
-        vos_mem_vfree(psessionEntry->dph.dphHashTable.pDphNodeArray);
+        vos_mem_free(psessionEntry->dph.dphHashTable.pDphNodeArray);
         psessionEntry->dph.dphHashTable.pDphNodeArray = NULL;
     }
 
     if(psessionEntry->gpLimPeerIdxpool != NULL)
     {
-        vos_mem_vfree(psessionEntry->gpLimPeerIdxpool);
+        vos_mem_free(psessionEntry->gpLimPeerIdxpool);
         psessionEntry->gpLimPeerIdxpool = NULL;
     }
 

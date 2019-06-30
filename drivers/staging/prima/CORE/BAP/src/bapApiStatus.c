@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013, 2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2013 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -249,7 +249,7 @@ WLAN_BAPReadLinkQuality
     /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
     VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH,
-               "%s: btampHandle value: %pK", __func__,  btampHandle);
+               "%s: btampHandle value: %p", __func__,  btampHandle);
 
     /* Validate params */ 
     if ((NULL == btampHandle) || (NULL == pBapHCIReadLinkQuality) ||
@@ -346,7 +346,7 @@ WLAN_BAPReadRSSI
     /*- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -*/
 
     VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH,
-               "%s: btampHandle value: %pK", __func__,  btampHandle);
+               "%s: btampHandle value: %p", __func__,  btampHandle);
 
     /* Validate params */ 
     if ((NULL == btampHandle) || (NULL == pBapHCIReadRSSI) ||
@@ -455,7 +455,7 @@ WLAN_BAPReadLocalAMPInfo
       return VOS_STATUS_E_FAULT;
     }
 
-    VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH, "%s: btampHandle value: %pK", __func__,  btampHandle);
+    VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH, "%s: btampHandle value: %p", __func__,  btampHandle);
 
 
     /* Format the command complete event to return... */ 
@@ -567,7 +567,7 @@ WLAN_BAPReadLocalAMPAssoc
       return VOS_STATUS_E_FAULT;
     }
 
-    VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH, "%s: btampHandle value: %pK", __func__,  btampHandle);
+    VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH, "%s: btampHandle value: %p", __func__,  btampHandle);
 
     VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH, 
             "In %s, phy_link_handle = %d", __func__, 
@@ -804,13 +804,13 @@ WLAN_BAPWriteRemoteAMPAssoc
       return VOS_STATUS_E_FAULT;
     }
 
-    VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH, "%s: btampHandle value: %pK", __func__,  btampHandle);
+    VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH, "%s: btampHandle value: %p", __func__,  btampHandle);
 
     /* Fill in the event structure */ 
     bapEvent.event = eWLAN_BAP_HCI_WRITE_REMOTE_AMP_ASSOC;
     bapEvent.params = pBapHCIWriteRemoteAMPAssoc;
 
-    VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH, "%s: btampContext value: %pK", __func__,  btampContext);
+    VOS_TRACE( VOS_MODULE_ID_BAP, VOS_TRACE_LEVEL_INFO_HIGH, "%s: btampContext value: %p", __func__,  btampContext);
 
     /* Handle event */ 
     vosStatus = btampFsm(btampContext, &bapEvent, &status);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -44,6 +44,12 @@
 #ifndef _ANIGLOBAL_H
 #define _ANIGLOBAL_H
 
+// Take care to avoid redefinition of this type, if it is
+// already defined in "halWmmApi.h"
+#if !defined(_HALMAC_WMM_API_H)
+typedef struct sAniSirGlobal *tpAniSirGlobal;
+#endif
+
 #include "halTypes.h"
 #include "sirCommon.h"
 #include "aniSystemDefs.h"
@@ -85,8 +91,6 @@
 #include "eseGlobal.h"
 #endif
 #include "p2p_Api.h"
-
-#include "limRMC.h"
 
 #if defined WLAN_FEATURE_VOWIFI_11R
 #include <limFTDefs.h>
@@ -224,18 +228,18 @@ typedef struct sLimTimers
     TX_TIMER           gLimFTPreAuthRspTimer;
 #endif
 
-#ifdef WLAN_FEATURE_LFR_MBB
-    TX_TIMER           glim_pre_auth_mbb_rsp_timer;
-    TX_TIMER           glim_reassoc_mbb_rsp_timer;
-#endif
-
 #ifdef FEATURE_WLAN_ESE
     TX_TIMER           gLimEseTsmTimer;
 #endif
+#ifdef FEATURE_WLAN_TDLS_INTERNAL
+    TX_TIMER           gLimTdlsDisRspWaitTimer;
+    TX_TIMER           gLimTdlsLinkSetupRspTimeouTimer;
+    TX_TIMER           gLimTdlsLinkSetupCnfTimeoutTimer;
+#endif
+
     TX_TIMER           gLimPeriodicJoinProbeReqTimer;
     TX_TIMER           gLimDisassocAckTimer;
     TX_TIMER           gLimDeauthAckTimer;
-    TX_TIMER           gLimPeriodicAuthRetryTimer;
     // This timer is started when single shot NOA insert msg is sent to FW for scan in P2P GO mode
     TX_TIMER           gLimP2pSingleShotNoaInsertTimer;
     /* This timer is used to convert active channel to
@@ -243,7 +247,6 @@ typedef struct sLimTimers
      * for a period of time on a particular DFS channel
      */
     TX_TIMER           gLimActiveToPassiveChannelTimer;
-    TX_TIMER           g_lim_ap_ecsa_timer;
 //********************TIMER SECTION ENDS**************************************************
 // ALL THE FIELDS BELOW THIS CAN BE ZEROED OUT in limInitialize
 //****************************************************************************************
@@ -254,11 +257,6 @@ typedef struct {
     void *pMlmDisassocReq;
     void *pMlmDeauthReq;
 }tLimDisassocDeauthCnfReq;
-
-typedef struct {
-    tANI_U32 failed_count[MAX_TIDS];
-    v_TIME_t failed_timestamp[MAX_TIDS];
-} tLimStaBAInfo;
 
 typedef struct sAniSirLim
 {
@@ -376,8 +374,6 @@ typedef struct sAniSirLim
 
     //////////////////////////////////////     SCAN/LEARN RELATED START ///////////////////////////////////////////
     tSirMacAddr         gSelfMacAddr;   //added for BT-AMP Support 
-    tSirMacAddr         spoofMacAddr;   //added for Mac Addr Spoofing support
-    tANI_U8             isSpoofingEnabled;
 
     //////////////////////////////////////////     BSS RELATED END ///////////////////////////////////////////
     // Place holder for StartBssReq message
@@ -427,7 +423,6 @@ typedef struct sAniSirLim
     /// Definition for storing IBSS peers BSS description
     tLimIbssPeerNode      *gLimIbssPeerList;
     tANI_U32               gLimNumIbssPeers;
-    tANI_U32               gLimIbssRetryCnt;
 
     // ibss info - params for which ibss to join while coalescing
     tAniSirLimIbss      ibssInfo;
@@ -865,6 +860,22 @@ typedef struct sAniSirLim
 
     ////////////////////////////////  HT RELATED           //////////////////////////////////////////
 
+#ifdef FEATURE_WLAN_TDLS_INTERNAL
+    ////////////////////////////////  TDLS RELATED         //////////////////////////////////////////
+    
+    tSirTdlsDisReq gLimTdlsDisReq ; 
+    //tLimDisResultList *gTdlsDisResultList ;
+    tLimDisResultList *gLimTdlsDisResultList ;
+    tANI_U8 gLimTdlsDisStaCount ;
+    tANI_U8 gAddStaDisRspWait ;
+
+    tLimTdlsLinkSetupInfo  gLimTdlsLinkSetupInfo;
+    
+    /* to track if direct link is b/g/n, this can be independent of AP link */
+#ifdef FEATURE_WLAN_TDLS_NEGATIVE
+    tANI_U32 gLimTdlsNegativeBehavior;  
+#endif
+#endif
 #ifdef FEATURE_WLAN_TDLS
     tANI_U8 gLimAddStaTdls ;
     tANI_U8 gLimTdlsLinkMode ;
@@ -911,9 +922,6 @@ tLimMlmOemDataRsp       *gpLimMlmOemDataRsp;
      * debug marker frame.
      */
     tANI_U32 remOnChnSeqNum;
-    tANI_U32 txBdToken;
-    tANI_U32 EnableTdls2040BSSCoexIE;
-    tLimStaBAInfo staBaInfo[WLAN_MAX_STA_COUNT];
 } tAniSirLim, *tpAniSirLim;
 
 typedef struct sLimMgmtFrameRegistration
@@ -940,14 +948,6 @@ typedef struct sFTContext
   tftPEContext  ftPEContext; 
 } tftContext, *tpFTContext;
 #endif
-
-typedef struct assoc_rsp_tx_context
-{
-  vos_list_node_t node;
-  tANI_U8 psessionID;
-  tANI_U16 staId;
-  tANI_U32 txBdToken;
-} assoc_rsp_tx_context;
 
 //Check if this definition can actually move here even for Volans. In that case
 //this featurization can be removed.
@@ -992,13 +992,6 @@ typedef struct sHalMacStartParameters
 
 } tHalMacStartParameters;
 
-typedef enum
-{
-    LIM_AUTH_ACK_NOT_RCD,
-    LIM_AUTH_ACK_RCD_SUCCESS,
-    LIM_AUTH_ACK_RCD_FAILURE,
-} tAuthAckStatus;
-
 // -------------------------------------------------------------------
 /// MAC Sirius parameter structure
 typedef struct sAniSirGlobal
@@ -1036,6 +1029,9 @@ typedef struct sAniSirGlobal
 #ifdef FEATURE_OEM_DATA_SUPPORT
     tOemDataStruct oemData;
 #endif
+#ifdef FEATURE_WLAN_TDLS_INTERNAL
+    tCsrTdlsCtxStruct tdlsCtx ;
+#endif
     tPmcInfo     pmc;
     tSmeBtcInfo  btc;
 
@@ -1053,7 +1049,7 @@ typedef struct sAniSirGlobal
 #if defined WLAN_FEATURE_VOWIFI_11R
     tftContext   ft;
 #endif
-    vos_list_t assoc_rsp_completion_list;
+
     tANI_U32     gCurrentLogSize;
     tANI_U32     menuCurrent;
     /* logDump specific */
@@ -1065,9 +1061,6 @@ typedef struct sAniSirGlobal
     v_BOOL_t isTdlsPowerSaveProhibited;
 #endif
     tANI_U8 fScanOffload;
-#ifdef WLAN_FEATURE_RMC
-    tLimRmcContext  rmcContext;
-#endif /* WLAN_FEATURE_RMC */
     tANI_U8 isCoalesingInIBSSAllowed;
     tANI_U32 fEnableDebugLog;
     tANI_U32 fDeferIMPSTime;
@@ -1081,27 +1074,7 @@ typedef struct sAniSirGlobal
 
     v_BOOL_t isCoexScoIndSet;
     v_U8_t miracast_mode;
-    v_U8_t fBtcEnableIndTimerVal;
-    v_U8_t roamDelayStatsEnabled;
     tANI_BOOLEAN miracastVendorConfig;
-    v_BOOL_t fActiveScanOnDFSChannels;
-    tAuthAckStatus  authAckStatus;
-    sir_mgmt_frame_ind_callback mgmt_frame_ind_cb;
-#ifdef WLAN_FEATURE_ROAM_SCAN_OFFLOAD
-    v_U8_t PERroamCandidatesCnt;
-    tSirCandidateChanInfo candidateChannelInfo[SIR_PER_ROAM_MAX_CANDIDATE_CNT];
-    tSirRoamAPInfo previousRoamApInfo[SIR_PER_ROAM_MAX_CANDIDATE_CNT];
-    v_U32_t PERroamTimeout;
-    v_U32_t currentBssScore;
-#endif
-#ifdef SAP_AUTH_OFFLOAD
-    bool sap_auth_offload;
-    uint32_t sap_auth_offload_sec_type;
-#endif /* SAP_AUTH_OFFLOAD */
-   bool max_power_cmd_pending;
-   uint32_t sta_auth_retries_for_code17;
-   uint32_t sta_sap_scc_on_dfs_chan;
-   bool force_scc_with_ecsa;
 } tAniSirGlobal;
 
 #ifdef FEATURE_WLAN_TDLS

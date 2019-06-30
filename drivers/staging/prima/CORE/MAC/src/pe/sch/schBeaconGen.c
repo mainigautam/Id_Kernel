@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2013 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -38,7 +38,7 @@
  */
  
 #include "palTypes.h"
-#include "wniCfg.h"
+#include "wniCfgSta.h"
 #include "aniGlobal.h"
 #include "sirMacProtDef.h"
 
@@ -276,7 +276,6 @@ tSirRetStatus schSetFixedBeaconFields(tpAniSirGlobal pMac,tpPESession psessionEn
     if((psessionEntry->limSystemRole == eLIM_AP_ROLE) 
         && ((psessionEntry->proxyProbeRspEn)
         || (IS_FEATURE_SUPPORTED_BY_FW(WPS_PRBRSP_TMPL)))
-        && vos_is_probe_rsp_offload_enabled()
       )
     {
         /* Initialize the default IE bitmap to zero */
@@ -286,15 +285,9 @@ tSirRetStatus schSetFixedBeaconFields(tpAniSirGlobal pMac,tpPESession psessionEn
         vos_mem_set(( tANI_U8* )&(psessionEntry->probeRespFrame),
                     sizeof(psessionEntry->probeRespFrame), 0);
 
-        /* Can be efficiently updated whenever new IE added
-         * in Probe response in future
-         */
-        if (limUpdateProbeRspTemplateIeBitmapBeacon1(pMac, pBcn1,
-                psessionEntry) != eSIR_SUCCESS)
-        {
-                    schLog(pMac, LOGE,
-                        FL("Failed to build ProbeRsp template"));
-        }
+        /* Can be efficiently updated whenever new IE added  in Probe response in future */
+        limUpdateProbeRspTemplateIeBitmapBeacon1(pMac,pBcn1,&psessionEntry->DefProbeRspIeBitmap[0],
+                                                &psessionEntry->probeRespFrame);
     }
 
     nStatus = dot11fPackBeacon1( pMac, pBcn1, ptr,
@@ -345,49 +338,19 @@ tSirRetStatus schSetFixedBeaconFields(tpAniSirGlobal pMac,tpPESession psessionEn
         PopulateDot11fHTCaps( pMac,psessionEntry, &pBcn2->HTCaps );
         PopulateDot11fHTInfo( pMac, &pBcn2->HTInfo, psessionEntry );
     }
-
-#ifdef WLAN_FEATURE_AP_HT40_24G
-    if ((pMac->roam.configParam.apHT40_24GEnabled)
-     && (IS_DOT11_MODE_HT(psessionEntry->dot11mode)))
-    {
-        PopulateDot11fOBSSScanParameters( pMac, &pBcn2->OBSSScanParameters,
-                                                               psessionEntry);
-        /* 10.15.8 Support of DSSS/CCK in 40 MHz, An associated HT STA in
-         * a 20/40 MHz BSS may generate DSSS/CCK transmissions. Set DSSS/CCK
-         * Mode in 40 MHz bit in HT capablity.
-         */
-        pBcn2->HTCaps.dsssCckMode40MHz = 1;
-    }
-#endif
-
-    PopulateDot11fExtCap( pMac, &pBcn2->ExtCap, psessionEntry);
-
 #ifdef WLAN_FEATURE_11AC
     if(psessionEntry->vhtCapability)
     {        
         schLog( pMac, LOGW, FL("Populate VHT IEs in Beacon"));
-        PopulateDot11fVHTCaps( pMac, &pBcn2->VHTCaps,
-                              psessionEntry->currentOperChannel, eSIR_TRUE );
-        PopulateDot11fVHTOperation( pMac, &pBcn2->VHTOperation,
-                                          psessionEntry->currentOperChannel);
+        PopulateDot11fVHTCaps( pMac, &pBcn2->VHTCaps, eSIR_TRUE );
+        PopulateDot11fVHTOperation( pMac, &pBcn2->VHTOperation);
         // we do not support multi users yet
         //PopulateDot11fVHTExtBssLoad( pMac, &bcn2.VHTExtBssLoad);
+        PopulateDot11fExtCap( pMac, &pBcn2->ExtCap, psessionEntry);
         if(psessionEntry->gLimOperatingMode.present)
             PopulateDot11fOperatingMode( pMac, &pBcn2->OperatingMode, psessionEntry );
     }
 #endif
-
-    if (LIM_IS_AP_ROLE(psessionEntry) && psessionEntry->include_ecsa_ie) {
-       populate_dot11f_ext_chann_switch_ann(pMac, &pBcn2->ext_chan_switch_ann,
-                                              psessionEntry);
-       if (psessionEntry->lim11hEnable) {
-           PopulateDot11fChanSwitchAnn(pMac,
-                                       &pBcn2->ChanSwitchAnn, psessionEntry);
-           if (psessionEntry->include_wide_ch_bw_ie)
-               PopulateDot11fWiderBWChanSwitchAnn(pMac,
-                                &pBcn2->WiderBWChanSwitchAnn, psessionEntry);
-       }
-    }
 
     PopulateDot11fExtSuppRates( pMac, POPULATE_DOT11F_RATES_OPERATIONAL,
                                 &pBcn2->ExtSuppRates, psessionEntry );
@@ -398,13 +361,6 @@ tSirRetStatus schSetFixedBeaconFields(tpAniSirGlobal pMac,tpPESession psessionEn
                        &pBcn2->WPA );
           PopulateDot11fRSNOpaque( pMac, &psessionEntry->pLimStartBssReq->rsnIE,
                        &pBcn2->RSNOpaque );
-#ifdef SAP_AUTH_OFFLOAD
-          /* Software AP Authentication Offload feature
-           * only support WPA2-PSK AES and we
-           * need to update RSNIE for beacon
-           */
-          sap_auth_offload_update_rsn_ie(pMac, &pBcn2->RSNOpaque);
-#endif
     }
 
     if(psessionEntry->limWmeEnabled)
@@ -446,7 +402,6 @@ tSirRetStatus schSetFixedBeaconFields(tpAniSirGlobal pMac,tpPESession psessionEn
     if((psessionEntry->limSystemRole == eLIM_AP_ROLE) 
         && ((psessionEntry->proxyProbeRspEn)
         || (IS_FEATURE_SUPPORTED_BY_FW(WPS_PRBRSP_TMPL)))
-        && vos_is_probe_rsp_offload_enabled()
       )
     {
         /* Can be efficiently updated whenever new IE added  in Probe response in future */
@@ -475,6 +430,7 @@ tSirRetStatus schSetFixedBeaconFields(tpAniSirGlobal pMac,tpPESession psessionEn
         }
 
     }
+
     nStatus = dot11fPackBeacon2( pMac, pBcn2,
                                  pMac->sch.schObject.gSchBeaconFrameEnd,
                                  SCH_MAX_BEACON_SIZE, &nBytes );
@@ -530,21 +486,11 @@ tSirRetStatus schSetFixedBeaconFields(tpAniSirGlobal pMac,tpPESession psessionEn
     return eSIR_SUCCESS;
 }
 
-tSirRetStatus limUpdateProbeRspTemplateIeBitmapBeacon1(tpAniSirGlobal pMac,
+void limUpdateProbeRspTemplateIeBitmapBeacon1(tpAniSirGlobal pMac,
                                               tDot11fBeacon1* beacon1,
-                                              tpPESession psessionEntry)
+                                              tANI_U32* DefProbeRspIeBitmap,
+                                              tDot11fProbeResponse* prb_rsp)
 {
-    tANI_U32* DefProbeRspIeBitmap;
-    tDot11fProbeResponse* prb_rsp;
-
-    if (!psessionEntry) {
-        schLog(pMac, LOGE, FL("PESession is null!"));
-        return eSIR_FAILURE;
-    }
-
-    DefProbeRspIeBitmap = &psessionEntry->DefProbeRspIeBitmap[0];
-    prb_rsp = &psessionEntry->probeRespFrame;
-
     prb_rsp->BeaconInterval = beacon1->BeaconInterval;
     vos_mem_copy((void *)&prb_rsp->Capabilities, (void *)&beacon1->Capabilities,
                  sizeof(beacon1->Capabilities));
@@ -553,10 +499,8 @@ tSirRetStatus limUpdateProbeRspTemplateIeBitmapBeacon1(tpAniSirGlobal pMac,
     if(beacon1->SSID.present)
     {
         SetProbeRspIeBitmap(DefProbeRspIeBitmap,SIR_MAC_SSID_EID);
-        /* populating it, because probe response has to go with
-         * SSID even in hidden case
-         */
-        PopulateDot11fSSID(pMac, &psessionEntry->ssId, &prb_rsp->SSID);
+        /* populating it, because probe response has to go with SSID even in hidden case */
+        PopulateDot11fSSID2( pMac, &prb_rsp->SSID );
     }
     /* supported rates */
     if(beacon1->SuppRates.present)
@@ -576,8 +520,6 @@ tSirRetStatus limUpdateProbeRspTemplateIeBitmapBeacon1(tpAniSirGlobal pMac,
     }
 
     /* IBSS params will not be present in the Beacons transmitted by AP */
-
-    return eSIR_SUCCESS;
 }
 
 void limUpdateProbeRspTemplateIeBitmapBeacon2(tpAniSirGlobal pMac,
@@ -602,28 +544,13 @@ void limUpdateProbeRspTemplateIeBitmapBeacon2(tpAniSirGlobal pMac,
                      sizeof(beacon2->PowerConstraints));
 
     }
-
-    if (beacon2->ext_chan_switch_ann.present) {
-        SetProbeRspIeBitmap(DefProbeRspIeBitmap,
-                            SIR_MAC_EXT_CHNL_SWITCH_ANN_EID);
-        vos_mem_copy((void *)&prb_rsp->ext_chan_switch_ann,
-                     (void *)&beacon2->ext_chan_switch_ann,
-                     sizeof(beacon2->ext_chan_switch_ann));
-    }
     /* Channel Switch Annoouncement SIR_MAC_CHNL_SWITCH_ANN_EID */
     if(beacon2->ChanSwitchAnn.present)
     {
         SetProbeRspIeBitmap(DefProbeRspIeBitmap,SIR_MAC_CHNL_SWITCH_ANN_EID);
         vos_mem_copy((void *)&prb_rsp->ChanSwitchAnn, (void *)&beacon2->ChanSwitchAnn,
                      sizeof(beacon2->ChanSwitchAnn));
-       if (beacon2->WiderBWChanSwitchAnn.present)
-       {
-          SetProbeRspIeBitmap(DefProbeRspIeBitmap,
-                              SIR_MAC_WIDER_BW_CHANNEL_SWITCH_ANN);
-          vos_mem_copy((void *)&prb_rsp->WiderBWChanSwitchAnn,
-                     (void *)&beacon2->WiderBWChanSwitchAnn,
-                     sizeof(beacon2->WiderBWChanSwitchAnn));
-       }
+
     }
     /* ERP information */
     if(beacon2->ERPInfo.present)
@@ -689,31 +616,6 @@ void limUpdateProbeRspTemplateIeBitmapBeacon2(tpAniSirGlobal pMac,
         vos_mem_copy((void *)&prb_rsp->HTInfo, (void *)&beacon2->HTInfo,
                      sizeof(beacon2->HTInfo));
     }
-
-#ifdef WLAN_FEATURE_AP_HT40_24G
-    // Overlapping BSS Scan Parameters IE
-    if (pMac->roam.configParam.apHT40_24GEnabled)
-    {
-        if (beacon2->OBSSScanParameters.present)
-        {
-            SetProbeRspIeBitmap(DefProbeRspIeBitmap,
-                          SIR_MAC_OBSS_SCAN_PARAMETERS_EID);
-            vos_mem_copy((void *)&prb_rsp->OBSSScanParameters,
-                              (void *)&beacon2->OBSSScanParameters,
-                              sizeof(beacon2->OBSSScanParameters));
-        }
-
-        if (beacon2->ExtCap.present)
-        {
-            SetProbeRspIeBitmap(DefProbeRspIeBitmap,
-                        SIR_MAC_EXTENDED_CAPABILITIES_EID);
-            vos_mem_copy((void *)&prb_rsp->ExtCap,
-                              (void *)&beacon2->ExtCap,
-                              sizeof(beacon2->ExtCap));
-
-        }
-    }
-#endif
 
 #ifdef WLAN_FEATURE_11AC
     if(beacon2->VHTCaps.present)
