@@ -370,7 +370,6 @@ int udpv6_recvmsg(struct kiocb *iocb, struct sock *sk,
 	int peeked, off = 0;
 	int err;
 	int is_udplite = IS_UDPLITE(sk);
-	bool checksum_valid = false;
 	int is_udp4;
 	bool slow;
 
@@ -402,17 +401,15 @@ try_again:
 	 */
 
 	if (copied < ulen || UDP_SKB_CB(skb)->partial_cov) {
-		checksum_valid = !udp_lib_checksum_complete(skb);
-		if (!checksum_valid)
+		if (udp_lib_checksum_complete(skb))
 			goto csum_copy_err;
 	}
 
-	if (checksum_valid || skb_csum_unnecessary(skb))
+	if (skb_csum_unnecessary(skb))
 		err = skb_copy_datagram_iovec(skb, sizeof(struct udphdr),
 					      msg->msg_iov, copied);
 	else {
-		err = skb_copy_and_csum_datagram_iovec(skb, sizeof(struct udphdr),
-						       msg->msg_iov, copied);
+		err = skb_copy_and_csum_datagram_iovec(skb, sizeof(struct udphdr), msg->msg_iov);
 		if (err == -EINVAL)
 			goto csum_copy_err;
 	}
@@ -497,8 +494,10 @@ csum_copy_err:
 	}
 	unlock_sock_fast(sk, slow);
 
-	/* starting over for a new packet, but check if we need to yield */
-	cond_resched();
+	if (noblock)
+		return -EAGAIN;
+
+	/* starting over for a new packet */
 	msg->msg_flags &= ~MSG_TRUNC;
 	goto try_again;
 }
@@ -842,9 +841,11 @@ int __udp6_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		int ret = udpv6_queue_rcv_skb(sk, skb);
 		sock_put(sk);
 
-		/* a return value > 0 means to resubmit the input */
+		/* a return value > 0 means to resubmit the input, but
+		 * it wants the return to be -protocol, or 0
+		 */
 		if (ret > 0)
-			return ret;
+			return -ret;
 
 		return 0;
 	}
@@ -1016,7 +1017,6 @@ int udpv6_sendmsg(struct kiocb *iocb, struct sock *sk,
 	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *) msg->msg_name;
 	struct in6_addr *daddr, *final_p, final;
 	struct ipv6_txoptions *opt = NULL;
-	struct ipv6_txoptions *opt_to_free = NULL;
 	struct ip6_flowlabel *flowlabel = NULL;
 	struct flowi6 fl6;
 	struct dst_entry *dst;
@@ -1171,10 +1171,8 @@ do_udp_sendmsg:
 			opt = NULL;
 		connected = 0;
 	}
-	if (!opt) {
-		opt = txopt_get(np);
-		opt_to_free = opt;
-	}
+	if (opt == NULL)
+		opt = np->opt;
 	if (flowlabel)
 		opt = fl6_merge_options(&opt_space, flowlabel, opt);
 	opt = ipv6_fixup_options(&opt_space, opt);
@@ -1275,7 +1273,6 @@ do_append_data:
 out:
 	dst_release(dst);
 	fl6_sock_release(flowlabel);
-	txopt_put(opt_to_free);
 	if (!err)
 		return len;
 	/*
@@ -1371,17 +1368,12 @@ static void udp6_sock_seq_show(struct seq_file *seq, struct sock *sp, int bucket
 	struct inet_sock *inet = inet_sk(sp);
 	struct ipv6_pinfo *np = inet6_sk(sp);
 	const struct in6_addr *dest, *src;
-	__u8 state = sp->sk_state;
 	__u16 destp, srcp;
 
 	dest  = &np->daddr;
 	src   = &np->rcv_saddr;
 	destp = ntohs(inet->inet_dport);
 	srcp  = ntohs(inet->inet_sport);
-
-	if (inet->transparent)
-		state |= 0x80;
-
 	seq_printf(seq,
 		   "%5d: %08X%08X%08X%08X:%04X %08X%08X%08X%08X:%04X "
 		   "%02X %08X:%08X %02X:%08lX %08X %5d %8d %lu %d %pK %d\n",
@@ -1390,7 +1382,7 @@ static void udp6_sock_seq_show(struct seq_file *seq, struct sock *sp, int bucket
 		   src->s6_addr32[2], src->s6_addr32[3], srcp,
 		   dest->s6_addr32[0], dest->s6_addr32[1],
 		   dest->s6_addr32[2], dest->s6_addr32[3], destp,
-		   state,
+		   sp->sk_state,
 		   sk_wmem_alloc_get(sp),
 		   sk_rmem_alloc_get(sp),
 		   0, 0L, 0,

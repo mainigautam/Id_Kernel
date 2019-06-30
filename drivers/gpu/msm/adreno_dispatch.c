@@ -406,7 +406,7 @@ static struct kgsl_cmdbatch *_get_cmdbatch(struct adreno_context *drawctxt)
 		 * it hasn't already been started
 		 */
 		if (!cmdbatch->timeout_jiffies) {
-			cmdbatch->timeout_jiffies = jiffies + msecs_to_jiffies(5000);
+			cmdbatch->timeout_jiffies = jiffies + 5 * HZ;
 			mod_timer(&cmdbatch->timer, cmdbatch->timeout_jiffies);
 		}
 
@@ -1950,7 +1950,7 @@ static int adreno_dispatch_process_cmdqueue(struct adreno_device *adreno_dev,
  *
  * Process expired commands and send new ones.
  */
-static void adreno_dispatcher_work(struct kthread_work *work)
+static void adreno_dispatcher_work(struct work_struct *work)
 {
 	struct adreno_dispatcher *dispatcher =
 		container_of(work, struct adreno_dispatcher, work);
@@ -2025,7 +2025,7 @@ void adreno_dispatcher_schedule(struct kgsl_device *device)
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 	struct adreno_dispatcher *dispatcher = &adreno_dev->dispatcher;
 
-	queue_kthread_work(&kgsl_driver.worker, &dispatcher->work);
+	queue_work(device->work_queue, &dispatcher->work);
 }
 
 /**
@@ -2320,7 +2320,7 @@ int adreno_dispatcher_init(struct adreno_device *adreno_dev)
 	if (adreno_is_a304(adreno_dev))
 		_fault_timer_interval = 400;
 
-	init_kthread_work(&dispatcher->work, adreno_dispatcher_work);
+	INIT_WORK(&dispatcher->work, adreno_dispatcher_work);
 
 	init_completion(&dispatcher->idle_gate);
 	complete_all(&dispatcher->idle_gate);
